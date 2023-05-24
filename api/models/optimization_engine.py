@@ -52,9 +52,16 @@ class OptimizationEngine:
         if len(d_scores) == 0:
             return [], None if return_scores else None
         d_weighted_scores = dict()
+        d_score_to_candidates = dict()
         for candidate, scores in d_scores.items():
             weighted_score = self._calculate_weighted_score(scores)
             d_weighted_scores[candidate] = weighted_score
-        min_score = min(d_weighted_scores.values())
-        optimal_candidates = [ k for k in d_weighted_scores if d_weighted_scores[k] == min_score]
+            if weighted_score not in d_score_to_candidates:
+                d_score_to_candidates[weighted_score] = []
+            d_score_to_candidates[weighted_score].append(candidate)
+        optimal_candidates = [
+            {
+                'rating': score,
+                'candidates': candidate
+            } for score, candidate in sorted(d_score_to_candidates.items())]
         return optimal_candidates, d_weighted_scores if return_scores else None
