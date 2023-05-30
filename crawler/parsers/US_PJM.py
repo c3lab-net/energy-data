@@ -26,7 +26,8 @@ mapping = {
     'Other': 'unknown',
     'Other Renewables': 'unknown-renewables',
     'Solar': 'solar',
-    'Wind': 'wind'
+    'Wind': 'wind',
+    'Storage': 'battery',
 }
 
 def extract_data(session=None) -> tuple:
