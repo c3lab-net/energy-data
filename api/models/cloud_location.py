@@ -6,10 +6,10 @@ from pathlib import Path
 from flask import current_app
 from werkzeug.exceptions import NotFound
 
-from api.models.common import Coordinate
+from api.models.common import Coordinate, RouteInCoordinate
 from api.util import load_yaml_data
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class CloudRegion:
     provider: str
     code: str
@@ -93,14 +93,25 @@ class CloudLocationManager:
                 return region
         raise NotFound('Unknown region "%s" for provider "%s".' % (region_code, cloud_provider))
 
-def get_iso_route_between_region(src_region: str, dst_region: str) -> list[str]:
+def get_route_between_region(src_region: str, dst_region: str) -> list[RouteInCoordinate]:
     if src_region == dst_region:
         return []
     # TODO: look up from database
     if (src_region, dst_region) in [('AWS:us-west-1', 'AWS:us-east-1'),
                                     ('Azure:westus', 'Azure:eastus')]:
-        return ['CAISO_NORTH', 'SPP_KANSAS', 'PJM_DC']
-    if (src_region, dst_region) in [('AWS:us-east-1', 'AWS:us-west-1'),
+        # ['CAISO_NORTH', 'SPP_KANSAS', 'PJM_DC']
+        route_in_coordinates = [(37.2379, -121.7946), (37.751, -97.822), (39.0127, -77.5342)]
+    elif (src_region, dst_region) in [('AWS:us-east-1', 'AWS:us-west-1'),
                                     ('Azure:eastus', 'Azure:westus')]:
-        return ['PJM_DC', 'SPP_KANSAS', 'CAISO_NORTH']
-    raise NotImplementedError('TODO: look up from database')
+        # ['PJM_DC', 'SPP_KANSAS', 'CAISO_NORTH']
+        route_in_coordinates = [(39.0127, -77.5342), (37.751, -97.822), (37.2379, -121.7946)]
+    else:
+        raise NotImplementedError('TODO: look up from database')
+
+    route: list[CloudRegion] = []
+    for i in range(len(route_in_coordinates)):
+        coordinate = route_in_coordinates[i]
+        provider = f'{src_region}->{dst_region}'
+        cloud_region = CloudRegion(provider, f'hop{i}', f'Hop {i} of {provider}', None, coordinate)
+        route.append(cloud_region)
+    return route
