@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from datetime import timedelta, timezone
 import json
+from math import ceil
 from multiprocessing import Pool
 import traceback
 from typing import Any
@@ -142,7 +143,9 @@ def get_transfer_rate(route: list[CloudRegion], start: datetime, end: datetime, 
 
 def get_transfer_time(data_size_gb: float, transfer_rate: Rate) -> timedelta:
     data_size = Size(data_size_gb, SizeUnit.GB)
-    return data_size / transfer_rate
+    transfer_time: timedelta = (data_size / transfer_rate)
+    # Round to whole seconds for a later algorithm.
+    return timedelta(seconds=ceil(transfer_time.total_seconds()))
 
 def get_per_hop_transfer_power_in_watts(route: CloudRegion, transfer_rate: Rate) -> float:
     # NOTE: only consider routers for now.
