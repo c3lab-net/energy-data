@@ -197,6 +197,8 @@ def dump_emission_rates(ds: pd.Series) -> dict:
     return json.loads(ds.to_json(orient='index', date_format='iso'))
 
 def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[dict[OptimizationFactor, float], dict[str, Any]]:
+    current_app.logger.info('Calculating scores for region %s ...' % region)
+
     global d_candidate_routes
     d_scores = {}
     d_misc = {}
