@@ -15,8 +15,8 @@ from webargs.flaskparser import use_args
 from api.helpers.balancing_authority import get_iso_from_gps
 
 from api.helpers.carbon_intensity import calculate_total_carbon_emissions, get_carbon_intensity_list
-from api.models.cloud_location import CloudLocationManager, CloudRegion, get_iso_route_between_region
-from api.models.common import CarbonDataSource, ISOName, RouteInISO, get_iso_format_for_carbon_source, identify_iso_format
+from api.models.cloud_location import CloudLocationManager, CloudRegion, get_route_between_region
+from api.models.common import CarbonDataSource, Coordinate, ISOName, RouteInISO, get_iso_format_for_carbon_source, identify_iso_format
 from api.models.optimization_engine import OptimizationEngine, OptimizationFactor
 from api.models.wan_bandwidth import load_wan_bandwidth_model
 from api.models.workload import DEFAULT_DC_PUE, DEFAULT_NETWORK_PUE, DEFAULT_STORAGE_POWER, CloudLocation, Workload
@@ -72,13 +72,13 @@ def task_lookup_iso(region: CloudRegion) -> tuple:
     global carbon_data_source
     iso_format = get_iso_format_for_carbon_source(carbon_data_source)
     if region.iso and iso_format == identify_iso_format(region.iso):
-        return str(region), region.iso, None, None
+        return str(region), region.iso, region.gps, None, None
     try:
         (latitude, longitude) = region.gps
         iso = get_iso_from_gps(latitude, longitude, iso_format)
-        return str(region), iso, None, None
+        return str(region), iso, region.gps, None, None
     except Exception as ex:
-        return str(region), None, str(ex), traceback.format_exc()
+        return str(region), None, region.gps, str(ex), traceback.format_exc()
 
 def init_preload_carbon_data(_workload: Workload,
                                     _carbon_data_source: CarbonDataSource,
@@ -132,7 +132,7 @@ def get_preloaded_carbon_data(iso: str, start: datetime, end: datetime) -> list[
     else:
         raise ValueError(f'No carbon data found for iso {iso} in time range ({start}, {end})')
 
-def get_transfer_rate(route: list[ISOName], start: datetime, end: datetime, max_delay: timedelta) -> Rate:
+def get_transfer_rate(route: list[CloudRegion], start: datetime, end: datetime, max_delay: timedelta) -> Rate:
     # TODO: update this to consider route
     # return g_wan_bandwidth.available_bandwidth_at(timestamp=start.time())
     return Rate(125, RateUnit.Mbps)
@@ -141,7 +141,7 @@ def get_transfer_time(data_size_gb: float, transfer_rate: Rate) -> timedelta:
     data_size = Size(data_size_gb, SizeUnit.GB)
     return data_size / transfer_rate
 
-def get_per_hop_transfer_power_in_watts(route, transfer_rate: Rate) -> float:
+def get_per_hop_transfer_power_in_watts(route: CloudRegion, transfer_rate: Rate) -> float:
     # NOTE: only consider routers for now.
     CORE_ROUTER_POWER_WATT = 640
     CORE_ROUTER_CAPACITY_GBPS = 64
@@ -174,7 +174,7 @@ def get_carbon_emission_rates_as_pd_series(iso: ISOName, start: datetime, end: d
 def get_compute_carbon_emission_rates(iso: ISOName, start: datetime, end: datetime, host_power_in_watts: float) -> pd.Series:
     return get_carbon_emission_rates_as_pd_series(iso, start, end, host_power_in_watts)
 
-def get_transfer_carbon_emission_rates(route: list[ISOName], start: datetime, end: datetime,
+def get_transfer_carbon_emission_rates(route: list[CloudRegion], start: datetime, end: datetime,
                                        host_transfer_power_in_watts: float, per_hop_power_in_watts: float) -> \
                                         tuple[pd.Series,pd.Series,pd.Series]:
     if len(route) == 0: # Same region, no transfer needed.
@@ -183,7 +183,7 @@ def get_transfer_carbon_emission_rates(route: list[ISOName], start: datetime, en
     ds_network = pd.Series(dtype=float)
     ds_endpoints = pd.Series(dtype=float)
     for i in range(len(route)):
-        hop = route[i]
+        hop = route[i].iso
         # Part 1: Network power consumption
         ds_hop = get_carbon_emission_rates_as_pd_series(hop, start, end, per_hop_power_in_watts)
         ds_network = ds_network.add(ds_hop, fill_value=0)
@@ -282,15 +282,26 @@ def task_process_candidate(region: CloudRegion) -> tuple:
     except Exception as ex:
         return region_name, iso, None, None, str(ex), traceback.format_exc()
 
-
-def get_routes_in_iso_by_region(original_location: str, d_candidate_regions: dict[str, CloudRegion]) -> dict[str, RouteInISO]:
-    # TODO: route must include the src/dst ISOs for the src/dst locations.
+def get_routes_by_region(original_location: str,
+                                        d_candidate_regions: dict[str, CloudRegion]) -> dict[str, list[CloudRegion]]:
     d_region_route = {}
     for candidate_region in d_candidate_regions:
         # TODO: change original_location to be required
-        route_in_iso = get_iso_route_between_region(original_location, candidate_region) if original_location else []
-        d_region_route[candidate_region] = route_in_iso
+        if original_location:
+            d_region_route[candidate_region] = get_route_between_region(original_location, candidate_region)
+        else:
+            d_region_route[candidate_region] = []
     return d_region_route
+
+def assign_iso_to_route_hops(d_candidate_routes: dict[str, list[CloudRegion]],
+                             d_transit_hop_iso: dict[Coordinate, ISOName]) -> None:
+    """Assign ISO to transit hops in the route."""
+    for candidate in d_candidate_routes:
+        for i in range(len(d_candidate_routes[candidate])):
+            hop = d_candidate_routes[candidate][i]
+            if hop.iso:
+                continue
+            d_candidate_routes[candidate][i].iso = d_transit_hop_iso[hop.gps]
 
 class CarbonAwareScheduler(Resource):
     @use_args(marshmallow_dataclass.class_schema(Workload)())
@@ -307,31 +318,36 @@ class CarbonAwareScheduler(Resource):
         d_candidate_regions = get_candidate_regions(args.candidate_providers,
                                                   args.candidate_locations,
                                                   args.original_location)
+        d_candidate_routes = get_routes_by_region(args.original_location, d_candidate_regions)
         candidate_regions = list(d_candidate_regions.values())
-        d_candidate_routes = get_routes_in_iso_by_region(args.original_location, d_candidate_regions)
+        transfer_hop_regions = list(set(hop for route in d_candidate_routes.values() for hop in route))
 
         d_region_isos = dict()
         d_region_scores = dict()
         d_region_warnings = dict()
         d_misc_details = dict()
+        d_transit_hop_iso = dict()
 
+        all_regions = candidate_regions + transfer_hop_regions
         with Pool(1 if __debug__ else 4,
                   initializer=init_lookup_iso,
                   initargs=(args.carbon_data_source,)) as pool:
-            result_iso = pool.map(task_lookup_iso, candidate_regions)
-        for i in range(len(candidate_regions)):
-            (region_name, iso, ex, stack_trace) = result_iso[i]
+            result_iso = pool.map(task_lookup_iso, all_regions)
+        for i in range(len(all_regions)):
+            (region_name, iso, gps, ex, stack_trace) = result_iso[i]
             if iso:
-                d_region_isos[region_name] = iso
-                candidate_regions[i].iso = iso
+                if i < len(candidate_regions):
+                    d_region_isos[region_name] = iso
+                    candidate_regions[i].iso = iso
+                else:
+                    d_transit_hop_iso[gps] = iso
             else:
                 d_region_warnings[region_name] = ex
                 current_app.logger.error(f'ISO lookup failed for {region_name}: {ex}')
                 current_app.logger.error(stack_trace)
+        assign_iso_to_route_hops(d_candidate_routes, d_transit_hop_iso)
 
-        all_unique_isos = set(d_region_isos.values())
-        unique_transit_isos = set([ hop for route in d_candidate_routes.values() for hop in route])
-        all_unique_isos.update(unique_transit_isos)
+        all_unique_isos = set(d_region_isos.values()) | set(d_transit_hop_iso.values())
         carbon_data = dict()
         d_iso_errors = dict()
         with Pool(1 if __debug__ else 4,
