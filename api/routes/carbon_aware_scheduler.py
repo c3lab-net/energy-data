@@ -15,7 +15,7 @@ from pandas.tseries.frequencies import to_offset
 from webargs.flaskparser import use_args
 from api.helpers.balancing_authority import get_iso_from_gps
 
-from api.helpers.carbon_intensity import get_carbon_intensity_list, calculate_total_carbon_emissions_linear as calculate_total_carbon_emissions
+from api.helpers.carbon_intensity import get_carbon_intensity_list, calculate_total_carbon_emissions_linear, calculate_total_carbon_emissions_naive
 from api.models.cloud_location import CloudLocationManager, CloudRegion, get_route_between_cloud_regions
 from api.models.common import CarbonDataSource, Coordinate, ISOName, RouteInISO, get_iso_format_for_carbon_source, identify_iso_format
 from api.models.optimization_engine import OptimizationEngine, OptimizationFactor
@@ -244,6 +244,11 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
                     (transfer_carbon_emission_rates, \
                         transfer_network_carbon_emission_rates, \
                         transfer_endpoint_carbon_emission_rates) = all_transfer_carbon_emission_rates
+
+                    if workload.use_new_optimization:
+                        calculate_total_carbon_emissions = calculate_total_carbon_emissions_linear
+                    else:
+                        calculate_total_carbon_emissions = calculate_total_carbon_emissions_naive
 
                     runtime = end - start
                     (compute_carbon_emissions, transfer_carbon_emission), timings = \
