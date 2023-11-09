@@ -169,6 +169,7 @@ def get_carbon_emission_rates_as_pd_series(iso: ISOName, start: datetime, end: d
         ds_freq = to_offset(np.diff(ds.index).min())
         # pd.infer_freq() only works with perfectly regular frequency
         # ds_freq = to_offset(pd.infer_freq(ds.index))
+    ds.ffill(inplace=True)
     end_time_of_series = ds.index.max() + ds_freq
     ds[end_time_of_series.to_pydatetime()] = 0.
 
