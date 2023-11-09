@@ -428,8 +428,8 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             if integrals[1]:
                 t1_max = t2 - D1
                 op1 = max([op for op in OPs[1] if op <= t1_max], default=t1_max)
-                optimal_t1 = min((integrals[1][op1 - T0], op1), (integrals[1][t1_max - T0], t1_max), key=lambda x: x[0])[1]
-                min_integral_1 = integrals[1][optimal_t1 - T0]
+                optimal_t1 = min((integrals[1][op1], op1), (integrals[1][t1_max], t1_max), key=lambda x: x[0])[1]
+                min_integral_1 = integrals[1][optimal_t1]
             else:
                 optimal_t1 = 0
                 min_integral_1 = 0
@@ -438,18 +438,18 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             if integrals[3]:
                 t3_min = t2 + D2
                 op3 = min([op for op in OPs[3] if op >= t3_min], default=t3_min)
-                optimal_t3 = min((integrals[3][op3 - T0], op3), (integrals[3][t3_min - T0], t3_min), key=lambda x: x[0])[1]
-                min_integral_3 = integrals[3][optimal_t3 - T0]
+                optimal_t3 = min((integrals[3][op3], op3), (integrals[3][t3_min], t3_min), key=lambda x: x[0])[1]
+                min_integral_3 = integrals[3][optimal_t3]
             else:
                 optimal_t3 = t2 + D2
                 min_integral_3 = 0
 
             # Compare total integral
-            integral_total = min_integral_1 + integrals[2][t2 - T0] + min_integral_3
+            integral_total = min_integral_1 + integrals[2][t2] + min_integral_3
             if not math.isclose(integral_total, min_integral_total) and integral_total < min_integral_total:
                 min_integral_total = integral_total
                 T_optimal = [optimal_t1, t2, optimal_t3]
-                min_integrals = [min_integral_1, integrals[2][t2 - T0], min_integral_3]
+                min_integrals = [min_integral_1, integrals[2][t2], min_integral_3]
 
         perf_elapsed = time.time() - perf_start_time
         current_app.logger.debug('optimize_total_carbon() took %.3f seconds' % perf_elapsed)
