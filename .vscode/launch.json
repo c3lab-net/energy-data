@@ -11,7 +11,7 @@
             "program": "${userHome}/anaconda3/envs/flask/bin/gunicorn",
             "args": [
                 "api:create_app()",
-                "--bind=localhost:8082",
+                "--bind=0.0.0.0:8082",
                 "-w=1",
                 "--log-level=debug",
                 "-t=3600",
