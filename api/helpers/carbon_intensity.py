@@ -428,6 +428,8 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             if integrals[1]:
                 t1_max = t2 - D1
                 op1 = max([op for op in OPs[1] if op <= t1_max], default=t1_max)
+                # Order matters in argmin call below, as we want to pick the earlier time in case of equal values.
+                # In this case, op1 <= t1_max
                 optimal_t1 = min((integrals[1][op1], op1), (integrals[1][t1_max], t1_max), key=lambda x: x[0])[1]
                 min_integral_1 = integrals[1][optimal_t1]
             else:
@@ -438,7 +440,9 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             if integrals[3]:
                 t3_min = t2 + D2
                 op3 = min([op for op in OPs[3] if op >= t3_min], default=t3_min)
-                optimal_t3 = min((integrals[3][op3], op3), (integrals[3][t3_min], t3_min), key=lambda x: x[0])[1]
+                # Order matters in argmin call below, as we want to pick the earlier time in case of equal values.
+                # In this case, t3_min <= op3
+                optimal_t3 = min((integrals[3][t3_min], t3_min), (integrals[3][op3], op3), key=lambda x: x[0])[1]
                 min_integral_3 = integrals[3][optimal_t3]
             else:
                 optimal_t3 = t2 + D2
