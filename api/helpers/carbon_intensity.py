@@ -320,12 +320,12 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
 
     # Linear algorithm described in appendix A of the paper.
 
-    def calculate_integral_optimized(D, T_min, T_max, steps):
+    def calculate_integral_optimized(D, T_min, T_max, steps) -> dict[int, float]:
         """Calculate the integral of a step function with a given window [T_min, T_max] and step size D."""
         if len(steps) == 0:
             return {}
 
-        integral = {}
+        integral: dict[int, float] = {}
         last_step_time = T_min
         last_step_value = 0
 
@@ -398,7 +398,10 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
         return OP
 
     # Main function to optimize total carbon
-    def optimize_total_carbon(f1_steps, f2_steps, f3_steps, T0, T4, D1, D2, D3):
+    def optimize_total_carbon(f1_steps: list[tuple[int, float]],
+                              f2_steps: list[tuple[int, float]],
+                              f3_steps: list[tuple[int, float]],
+                              T0: int, T4: int, D1: int, D2: int, D3: int):
         integrals = {}
         OPs = {}
         assert T0 == 0, "T0 should be set to 0."
