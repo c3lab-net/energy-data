@@ -412,6 +412,7 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             if i == 1:
                 # In the non-reverse case (t1), we only consider the first point of equal value (hence strict comparison), because an earlier time with equal value is always available and thus preferred.
                 OPs[i] = get_optimal_points(integral, f_steps, D, Tmin, Tmax, False, lambda x, y: x < y)
+                OPs[i].reverse() # This is for faster lookup for the last element in the next step.
             elif i == 2:
                 # OPs for t2 is used to fast forward t2 in the linear scanning, and thus we consider all points where the integral changes.
                 OPs[i] = get_optimal_points(integral, f_steps, D, Tmin, Tmax, False, lambda x, y: True)
@@ -435,7 +436,7 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             # Calculate minimum integral for f1
             if integrals[1]:
                 t1_max = t2 - D1
-                op1 = max([op for op in OPs[1] if op <= t1_max], default=T1_MIN)
+                op1 = next((op for op in OPs[1] if op <= t1_max), T1_MIN)   # Note: OPs[1] is already reversed.
                 # Order matters in argmin call below, as we want to pick the earlier time in case of equal values.
                 # In this case, op1 <= t1_max
                 optimal_t1 = min((integrals[1][op1], op1), (integrals[1][t1_max], t1_max), key=lambda x: x[0])[1]
@@ -447,7 +448,7 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             # Calculate minimum integral for f3
             if integrals[3]:
                 t3_min = t2 + D2
-                op3 = min([op for op in OPs[3] if op >= t3_min], default=T3_MAX)
+                op3 = next((op for op in OPs[3] if op >= t3_min), T3_MAX)
                 # Order matters in argmin call below, as we want to pick the earlier time in case of equal values.
                 # In this case, t3_min <= op3
                 optimal_t3 = min((integrals[3][t3_min], t3_min), (integrals[3][op3], op3), key=lambda x: x[0])[1]
@@ -465,9 +466,9 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
 
             # min step of t2 till the next turning points of the total integral changes,
             #   which is the minimum step of t2 and t3 (for integral2 and integral3).
-            step_t2 = min([op for op in OPs[2] if op > t2], default=T2_MAX) - t2
+            step_t2 = next((op for op in OPs[2] if op > t2), T2_MAX) - t2
             if integrals[3]:
-                step_t3 = min([op for op in OPs[3] if op > optimal_t3], default=T3_MAX) - optimal_t3
+                step_t3 = next((op for op in OPs[3] if op > optimal_t3), T3_MAX) - optimal_t3
             else:
                 step_t3 = T4 - T0   # Large enough so it's bigger than step_t2
             t2 += max(min(step_t2, step_t3), 1) # Make sure step is at least 1
