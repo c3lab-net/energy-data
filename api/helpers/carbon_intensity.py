@@ -356,10 +356,11 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
         return integral
 
     # Procedure to get optimal points
-    def get_optimal_points(f_I, T_min, T_max, reverse) -> list[int]:
+    def get_optimal_points(f_I: dict[int, float], f_steps: list[tuple[int, float]],
+                           D: int, T_min: int, T_max: int, reverse: bool, compare) -> list[int]:
         """Get a sorted list of optimal points for a given integral function f_I.
 
-            Optimal points are defined as the series of turning points (where the derivative of f_I changes) and the values are non-increasaing. We do not need to consider other points because they are less optimal (has higher total carbon emissions on the curve).
+            Optimal points are defined as the series of turning points (where the derivative of f_I aka f_steps' value changes) and the values are more optimal (as defined by compare). We do not need to consider other points because they are less optimal (has higher total carbon emissions on the curve).
         """
         if len(f_I) == 0:
             return []
@@ -368,28 +369,21 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
         last_value = float('inf')
         interval = range(T_min, T_max + 1) if not reverse else range(T_max, T_min - 1, -1)
 
+        # The time points of the step function
+        f_step_inputs = set(x for x, _ in f_steps)
+
         def is_tuning_point(t):
-            """Check if the derivative of f_I changes at time t."""
-            # Approximate the derivative by the difference
-            # assuming the delta is small, here it's taken as 1 for simplicity
-            delta = 1
-            t_prev = max(t - delta, T_min)
-            t_next = min(t + delta, T_max)
+            """Check if the derivative of f_I changes at time t, aka whether the step function's value changes.
 
-            # Approximate the derivative by the difference
-            f_prime_previous = f_I[t] - f_I[t_prev]
-            f_prime_next = f_I[t_next] - f_I[t]
-
-            # Check if this is a turning point
-            return not math.isclose(f_prime_previous, f_prime_next, rel_tol=1e-6)
+                We can further simplify this by only checking whether the start time and end time appears in the step function's inputs.
+            """
+            return t in f_step_inputs or (t + D) in f_step_inputs
 
         for t in interval:
             if t != T_min and t != T_max and not is_tuning_point(t):
                 continue
             current_value = f_I[t]
-            # In the reverse case, we consider all the points of equal value, because a later point with equal value can still be picked.
-            # In the non-reverse case, we only consider the first point of equal value (hence strict comparison), because an earlier time with equal value is always available and thus preferred.
-            if (reverse and current_value <= last_value) or (not reverse and current_value < last_value):
+            if compare(current_value, last_value):
                 last_value = current_value
                 OP.append(t)
 
@@ -416,10 +410,11 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             integrals[i] = integral
 
             if i == 1:
-                OPs[i] = get_optimal_points(integral, Tmin, Tmax, False)
+                # In the non-reverse case (t1), we only consider the first point of equal value (hence strict comparison), because an earlier time with equal value is always available and thus preferred.
+                OPs[i] = get_optimal_points(integral, f_steps, D, Tmin, Tmax, False, lambda x, y: x < y)
             elif i == 3:
-                # TODO: debug difference from existing example (see graph)
-                OPs[i] = get_optimal_points(integral, Tmin, Tmax, True)
+                # In the reverse case (t3), we consider all the points of equal value, because a later point with equal value can still be picked.
+                OPs[i] = get_optimal_points(integral, f_steps, D, Tmin, Tmax, True, lambda x, y: x <= y)
 
         perf_elapsed = time.time() - perf_start_time
         current_app.logger.debug('Pre-calculation of integral and optimal points took %.3f seconds' % perf_elapsed)
