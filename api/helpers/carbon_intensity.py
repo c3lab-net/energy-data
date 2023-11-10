@@ -16,6 +16,9 @@ from api.helpers.carbon_intensity_emap import get_carbon_intensity_list as get_c
 from api.models.common import CarbonDataSource
 
 
+FLOAT_PRECISION = 8
+
+
 def get_carbon_intensity_list(iso: str, start: datetime, end: datetime,
         carbon_data_source: CarbonDataSource, use_prediction: bool,
         desired_renewable_ratio: float = None) -> list[dict]:
@@ -125,7 +128,7 @@ def calculate_total_carbon_emissions_naive(start: datetime, runtime: timedelta,
         # look up in existing carbon emission rates' cumulative carbon emission.
         (x_values, y_values) = carbon_emission_cumsum
         (start_cumsum, end_cumsum) = np.interp([start_timestamp, end_timestamp], x_values, y_values)
-        return end_cumsum - start_cumsum
+        return round(end_cumsum - start_cumsum, FLOAT_PRECISION)
 
     def _calculate_total_emission(curr_wait_times: list[datetime], breakdown=False):
         """Calculate the total carbon emissions based on the current wait times."""
@@ -347,7 +350,8 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             total -= steps_with_sentinel[start_index][1] * (t - steps_with_sentinel[start_index][0])
             total += steps_with_sentinel[end_index][1] * ((t + D) - steps_with_sentinel[end_index][0])
 
-            integral[t] = total
+            # Need to round to avoid floating point inequality for later comparison.
+            integral[t] = round(total, FLOAT_PRECISION)
 
         return integral
 
@@ -377,7 +381,7 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             f_prime_next = f_I[t_next] - f_I[t]
 
             # Check if this is a turning point
-            return not math.isclose(f_prime_previous, f_prime_next, abs_tol=1e-6)
+            return not math.isclose(f_prime_previous, f_prime_next, rel_tol=1e-6)
 
         for t in interval:
             if t != T_min and t != T_max and not is_tuning_point(t):
@@ -385,8 +389,7 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             current_value = f_I[t]
             # In the reverse case, we consider all the points of equal value, because a later point with equal value can still be picked.
             # In the non-reverse case, we only consider the first point of equal value (hence strict comparison), because an earlier time with equal value is always available and thus preferred.
-            if (reverse and (math.isclose(current_value, last_value) or current_value <= last_value)) or \
-                (not reverse and (not math.isclose(current_value, last_value) and current_value < last_value)):
+            if (reverse and current_value <= last_value) or (not reverse and current_value < last_value):
                 last_value = current_value
                 OP.append(t)
 
@@ -450,7 +453,7 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
 
             # Compare total integral
             integral_total = min_integral_1 + integrals[2][t2] + min_integral_3
-            if not math.isclose(integral_total, min_integral_total) and integral_total < min_integral_total:
+            if integral_total < min_integral_total:
                 min_integral_total = integral_total
                 T_optimal = [optimal_t1, t2, optimal_t3]
                 min_integrals = [min_integral_1, integrals[2][t2], min_integral_3]
