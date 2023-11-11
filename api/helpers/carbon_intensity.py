@@ -325,7 +325,6 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
         if len(steps) == 0:
             return {}
 
-        integral: dict[int, float] = {}
         last_step_time = T_min
         last_step_value = 0
 
@@ -340,15 +339,19 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             last_step_value = step_value
 
         # Calculate the integral at each time t using the pre-calculated values
+        integral: dict[int, float] = {}
+        start_index, end_index = 0, 0
         for t in range(T_min, T_max + 1):
-            # Find the steps that bound the current window [t, t+D)
-            start_index = bisect_left(steps_with_sentinel, (t, float('inf'))) - 1
-            end_index = bisect_left(steps_with_sentinel, (t + D, float('inf'))) - 1
+            # Update start_index and end_index if necessary
+            while steps_with_sentinel[start_index][0] <= t:
+                start_index += 1
+            while steps_with_sentinel[end_index][0] < t + D:
+                end_index += 1
 
             # Calculate the total using precalculated integrals and adjusting for the partial areas
-            total = precalc_integral[end_index + 1] - precalc_integral[start_index + 1]
-            total -= steps_with_sentinel[start_index][1] * (t - steps_with_sentinel[start_index][0])
-            total += steps_with_sentinel[end_index][1] * ((t + D) - steps_with_sentinel[end_index][0])
+            total = precalc_integral[end_index] - precalc_integral[start_index]
+            total -= steps_with_sentinel[start_index - 1][1] * (t - steps_with_sentinel[start_index - 1][0])
+            total += steps_with_sentinel[end_index - 1][1] * ((t + D) - steps_with_sentinel[end_index - 1][0])
 
             # Need to round to avoid floating point inequality for later comparison.
             integral[t] = round(total, FLOAT_PRECISION)
