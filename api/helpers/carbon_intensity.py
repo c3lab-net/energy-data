@@ -409,19 +409,28 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             integral = calculate_integral_optimized(D, Tmin, Tmax, f_steps)
             integrals[i] = integral
 
+        perf_elapsed = time.time() - perf_start_time
+        current_app.logger.debug('Pre-calculation of integral took %.3f seconds' % perf_elapsed)
+        perf_start_time = time.time()
+
+        for i, (f_steps, D) in enumerate(zip([f1_steps, f2_steps, f3_steps], [D1, D2, D3]), start=1):
+            Tmin = T0 + sum([D1, D2, D3][:i-1])
+            Tmax = T4 - sum([D1, D2, D3][i-1:])
             if i == 1:
                 # In the non-reverse case (t1), we only consider the first point of equal value (hence strict comparison), because an earlier time with equal value is always available and thus preferred.
-                OPs[i] = get_optimal_points(integral, f_steps, D, Tmin, Tmax, False, lambda x, y: x < y)
+                OPs[i] = get_optimal_points(integrals[i], f_steps, D, Tmin, Tmax, False, lambda x, y: x < y)
                 OPs[i].reverse() # This is for faster lookup for the last element in the next step.
             elif i == 2:
                 # OPs for t2 is used to fast forward t2 in the linear scanning, and thus we consider all points where the integral changes.
-                OPs[i] = get_optimal_points(integral, f_steps, D, Tmin, Tmax, False, lambda x, y: True)
+                OPs[i] = get_optimal_points(integrals[i], f_steps, D, Tmin, Tmax, False, lambda x, y: True)
             elif i == 3:
                 # In the reverse case (t3), we consider all the points of equal value, because a later point with equal value can still be picked.
-                OPs[i] = get_optimal_points(integral, f_steps, D, Tmin, Tmax, True, lambda x, y: x <= y)
+                OPs[i] = get_optimal_points(integrals[i], f_steps, D, Tmin, Tmax, True, lambda x, y: x <= y)
 
         perf_elapsed = time.time() - perf_start_time
-        current_app.logger.debug('Pre-calculation of integral and optimal points took %.3f seconds' % perf_elapsed)
+        current_app.logger.debug('Pre-calculation of optimal points took %.3f seconds' % perf_elapsed)
+
+        perf_start_time = time.time()
 
         min_integral_total = float('inf')
         T_optimal: list[int] = [np.nan, np.nan, np.nan]
@@ -474,7 +483,7 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             t2 += max(min(step_t2, step_t3), 1) # Make sure step is at least 1
 
         perf_elapsed = time.time() - perf_start_time
-        current_app.logger.debug('optimize_total_carbon() took %.3f seconds' % perf_elapsed)
+        current_app.logger.debug('Scanning t2 took %.3f seconds' % perf_elapsed)
 
         return T_optimal, min_integrals
 
