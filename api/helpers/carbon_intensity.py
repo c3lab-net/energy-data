@@ -519,6 +519,15 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             steps = [(int((t - T0_datetime).total_seconds()), value) for t, value in f_series.items()]
             return steps
 
+        # Validate we have enough data points to cover the entire time range [T0, T4]
+        for carbon_rates in [carbon_rates_1, carbon_rates_2, carbon_rates_3]:
+            if carbon_rates.empty:
+                continue
+            if carbon_rates.index[0] > T0:
+                raise ValueError("Not enough data points to cover the entire time range.")
+            if carbon_rates.index[-1] < T4:
+                raise ValueError("Not enough data points to cover the entire time range.")
+
         # Convert datetime and timedelta to seconds
         T0s = datetime_to_seconds(T0, T0)
         T4s = datetime_to_seconds(T0, T4)

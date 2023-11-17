@@ -176,6 +176,9 @@ def get_carbon_emission_rates_as_pd_series(iso: ISOName, start: datetime, end: d
     end_time_of_series = ds.index.max() + ds_freq
     ds[end_time_of_series.to_pydatetime()] = 0.
 
+    assert ds.index.min() <= start and end <= ds.index.max(), \
+        f'Carbon data not available for iso {iso} for the entire time range [{start}, {end}]'
+
     return ds
 
 def get_compute_carbon_emission_rates(iso: ISOName, start: datetime, end: datetime, host_power_in_watts: float) -> pd.Series:
