@@ -401,6 +401,7 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
                               T0: int, T4: int, D1: int, D2: int, D3: int):
         integrals = {}
         OPs = {}
+        OPs_reverse = {}
         assert T0 == 0, "T0 should be set to 0."
 
         perf_start_time = time.time()
@@ -422,7 +423,8 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             if i == 1:
                 # In the non-reverse case (t1), we only consider the first point of equal value (hence strict comparison), because an earlier time with equal value is always available and thus preferred.
                 OPs[i] = get_optimal_points(integrals[i], f_steps, D, Tmin, Tmax, False, lambda x, y: x < y)
-                OPs[i].reverse() # This is for faster lookup for the last element in the next step.
+                # This is for faster lookup for the last element in the next step.
+                OPs_reverse[i] = list(reversed(OPs[i]))
             elif i == 2:
                 # OPs for t2 is used to fast forward t2 in the linear scanning, and thus we consider all points where the integral changes.
                 OPs[i] = get_optimal_points(integrals[i], f_steps, D, Tmin, Tmax, False, lambda x, y: True)
@@ -442,13 +444,14 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
         # Find the optimal time intervals
         t2 = T0 + D1
         T1_MIN = T0
+        T1_MAX = T4 - D1 - D2 - D3
         T2_MAX = T4 - D2 - D3
         T3_MAX = T4 - D3
         while t2 <= T2_MAX:
             # Calculate minimum integral for f1
             if integrals[1]:
                 t1_max = t2 - D1
-                op1 = next((op for op in OPs[1] if op <= t1_max), T1_MIN)   # Note: OPs[1] is already reversed.
+                op1 = next((op for op in OPs_reverse[1] if op <= t1_max), T1_MIN)
                 # Order matters in argmin call below, as we want to pick the earlier time in case of equal values.
                 # In this case, op1 <= t1_max
                 optimal_t1 = min((integrals[1][op1], op1), (integrals[1][t1_max], t1_max), key=lambda x: x[0])[1]
@@ -477,13 +480,19 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
                 min_integrals = [min_integral_1, integrals[2][t2], min_integral_3]
 
             # min step of t2 till the next turning points of the total integral changes,
-            #   which is the minimum step of t2 and t3 (for integral2 and integral3).
+            #   which is the minimum step of t1, t2 and t3 (for integral1, integral2 and integral3).
+            if integrals[1]:
+                # Moving t2 might enable new OPs for t1, and the minimal distance is from current t1_max to the next OP.
+                step_t1 = next((op for op in OPs[1] if op > t1_max), T1_MAX) - t1_max
+            else:
+                step_t1 = T4 - T0   # Large enough so it's bigger than step_t2, so this is not considered
             step_t2 = next((op for op in OPs[2] if op > t2), T2_MAX) - t2
             if integrals[3]:
+                # Moving t2 might disable the current optimal t3, and the minimal distance is from current optimal_t3 to the next OP.
                 step_t3 = next((op for op in OPs[3] if op > optimal_t3), T3_MAX) - optimal_t3
             else:
-                step_t3 = T4 - T0   # Large enough so it's bigger than step_t2
-            t2 += max(min(step_t2, step_t3), 1) # Make sure step is at least 1
+                step_t3 = T4 - T0   # Large enough so it's bigger than step_t2, so this is not considered
+            t2 += max(min(step_t1, step_t2, step_t3), 1) # Make sure step is at least 1
 
         perf_elapsed = time.time() - perf_start_time
         current_app.logger.debug('Scanning t2 took %.3f seconds' % perf_elapsed)
