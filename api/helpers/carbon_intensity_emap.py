@@ -77,7 +77,7 @@ def fetch_prediction(region: str, start: datetime, end: datetime) -> list[dict]:
 @carbon_data_cache.memoize()
 def fetch_emissions(region: str, start: datetime, end: datetime) -> list[dict]:
     current_app.logger.debug(f'fetch_emissions({region}, {start}, {end})')
-    conn = get_psql_connection()
-    validate_region_exists(conn, region, TABLE_NAME, REGION_COLUMN)
-    validate_time_range(conn, region, start, end, TABLE_NAME, REGION_COLUMN)
-    return _get_carbon_intensity_timeseries(conn, region, start, end)
+    with get_psql_connection() as conn:
+        validate_region_exists(conn, region, TABLE_NAME, REGION_COLUMN)
+        validate_time_range(conn, region, start, end, TABLE_NAME, REGION_COLUMN)
+        return _get_carbon_intensity_timeseries(conn, region, start, end)

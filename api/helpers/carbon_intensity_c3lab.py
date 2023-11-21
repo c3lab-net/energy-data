@@ -149,12 +149,12 @@ def fetch_emissions(region: str, start: datetime, end: datetime,
                                  desired_renewable_ratio: float) -> list[dict]:
     # TODO: make this not throw exception for memoize to work
     current_app.logger.debug(f'fetch_emissions({region}, {start}, {end}, {desired_renewable_ratio})')
-    conn = get_psql_connection()
-    validate_region_exists(conn, region, TABLE_NAME, REGION_COLUMN)
-    validate_time_range(conn, region, start, end, TABLE_NAME, REGION_COLUMN)
-    return _get_average_carbon_intensity(conn, region, start, end, desired_renewable_ratio)
-    # power_by_fuel_source = get_power_by_timestamp_and_fuel_source(conn, region, start, end)
-    # return _calculate_average_carbon_intensity(power_by_fuel_source)
+    with get_psql_connection() as conn:
+        validate_region_exists(conn, region, TABLE_NAME, REGION_COLUMN)
+        validate_time_range(conn, region, start, end, TABLE_NAME, REGION_COLUMN)
+        return _get_average_carbon_intensity(conn, region, start, end, desired_renewable_ratio)
+        # power_by_fuel_source = get_power_by_timestamp_and_fuel_source(conn, region, start, end)
+        # return _calculate_average_carbon_intensity(power_by_fuel_source)
 
 @carbon_data_cache.memoize()
 def fetch_prediction(region: str, start: datetime, end: datetime,
@@ -188,10 +188,10 @@ def get_carbon_intensity_list(iso: str, start: datetime, end: datetime,
 def get_power_by_fuel_type(iso: str, start: datetime, end: datetime) -> list[dict]:
     """Retrieves the raw power (in MW) broken down by timestamp and fuel type."""
     region = get_c3lab_region_from_iso(iso)
-    conn = get_psql_connection()
-    validate_region_exists(conn, region, TABLE_NAME, REGION_COLUMN)
-    validate_time_range(conn, region, start, end, TABLE_NAME, REGION_COLUMN)
-    d_timestamp_fuel_power = _get_power_by_timestamp_and_fuel_source(conn, region, start, end)
+    with get_psql_connection() as conn:
+        validate_region_exists(conn, region, TABLE_NAME, REGION_COLUMN)
+        validate_time_range(conn, region, start, end, TABLE_NAME, REGION_COLUMN)
+        d_timestamp_fuel_power = _get_power_by_timestamp_and_fuel_source(conn, region, start, end)
     result = []
     for timestamp in d_timestamp_fuel_power:
         l_fuel_mix = []
