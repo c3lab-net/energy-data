@@ -8,12 +8,12 @@ public_clouds:
     gps:
     - -34.0486
     - 18.4811
-  - code: ap-east-1
-    name: Asia Pacific (Hong Kong)
-    iso: ''
-    gps:
-    - 22.2578
-    - 114.1657
+  # - code: ap-east-1
+  #   name: Asia Pacific (Hong Kong)
+  #   iso: ''
+  #   gps:
+  #   - 22.2578
+  #   - 114.1657
   - code: ap-northeast-1
     name: Asia Pacific (Tokyo)
     iso: ''
@@ -56,18 +56,18 @@ public_clouds:
     gps:
     - 45.4994
     - -73.5703
-  - code: cn-north-1
-    name: China (Beijing)
-    iso: ''
-    gps:
-    - 39.9075
-    - 116.3972
-  - code: cn-northwest-1
-    name: China (Ningxia)
-    iso: ''
-    gps:
-    - 37.2534
-    - 105.9976
+  # - code: cn-north-1
+  #   name: China (Beijing)
+  #   iso: ''
+  #   gps:
+  #   - 39.9075
+  #   - 116.3972
+  # - code: cn-northwest-1
+  #   name: China (Ningxia)
+  #   iso: ''
+  #   gps:
+  #   - 37.2534
+  #   - 105.9976
   - code: eu-central-1
     name: Europe (Frankfurt)
     iso: ''
@@ -104,12 +104,12 @@ public_clouds:
     gps:
     - 48.8323
     - 2.4075
-  - code: me-south-1
-    name: Middle East (Bahrain)
-    iso: ''
-    gps:
-    - 26.0022
-    - 50.5521
+  # - code: me-south-1
+  #   name: Middle East (Bahrain)
+  #   iso: ''
+  #   gps:
+  #   - 26.0022
+  #   - 50.5521
   - code: sa-east-1
     name: South America (Sao Paulo)
     iso: ''
@@ -128,18 +128,18 @@ public_clouds:
     gps:
     - 39.9625
     - -83.0061
-  - code: us-gov-east-1
-    name: AWS GovCloud (US-East)
-    iso: ''
-    gps:
-    - 39.9625
-    - -83.0061
-  - code: us-gov-west-1
-    name: AWS GovCloud (US-West)
-    iso: ''
-    gps:
-    - 45.8234
-    - -119.7257
+  # - code: us-gov-east-1
+  #   name: AWS GovCloud (US-East)
+  #   iso: ''
+  #   gps:
+  #   - 39.9625
+  #   - -83.0061
+  # - code: us-gov-west-1
+  #   name: AWS GovCloud (US-West)
+  #   iso: ''
+  #   gps:
+  #   - 45.8234
+  #   - -119.7257
   - code: us-west-1
     name: US West (N. California)
     iso: ''
@@ -160,12 +160,12 @@ public_clouds:
     gps:
     - 25.0504
     - 121.5324
-  - code: asia-east2
-    name: Hong Kong, APAC
-    iso: ''
-    gps:
-    - 22.2908
-    - 114.1501
+  # - code: asia-east2
+  #   name: Hong Kong, APAC
+  #   iso: ''
+  #   gps:
+  #   - 22.2908
+  #   - 114.1501
   - code: asia-northeast1
     name: Tokyo, Japan, APAC
     iso: ''
@@ -202,12 +202,12 @@ public_clouds:
     gps:
     - 1.3354
     - 103.8056
-  - code: asia-southeast2
-    name: Jakarta, Indonesia, APAC
-    iso: ''
-    gps:
-    - -6.1741
-    - 106.8296
+  # - code: asia-southeast2
+  #   name: Jakarta, Indonesia, APAC
+  #   iso: ''
+  #   gps:
+  #   - -6.1741
+  #   - 106.8296
   - code: australia-southeast1
     name: Sydney, Australia, APAC
     iso: ''
