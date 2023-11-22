@@ -215,6 +215,8 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
                 running_intervals = workload.get_running_intervals_in_24h()
                 max_delay = workload.schedule.max_delay
                 route = d_candidate_routes[str(region)]
+                if route is None:
+                    raise ValueError(f'No route found for {region}')
                 score = 0
                 d_misc['timings'] = []
                 d_misc['emission_rates'] = {}
@@ -301,11 +303,16 @@ def assign_iso_to_route_hops(d_candidate_routes: dict[str, list[CloudRegion]],
                              d_transit_hop_iso: dict[Coordinate, ISOName]) -> None:
     """Assign ISO to transit hops in the route."""
     for candidate in d_candidate_routes:
+        if d_candidate_routes[candidate] is None:
+            continue
         for i in range(len(d_candidate_routes[candidate])):
             hop = d_candidate_routes[candidate][i]
             if hop.iso:
                 continue
-            d_candidate_routes[candidate][i].iso = d_transit_hop_iso[hop.gps]
+            if hop.gps in d_transit_hop_iso:
+                d_candidate_routes[candidate][i].iso = d_transit_hop_iso[hop.gps]
+            else:
+                d_candidate_routes[candidate][i].iso = None
 
 class CarbonAwareScheduler(Resource):
     @use_args(marshmallow_dataclass.class_schema(Workload)())
@@ -324,7 +331,7 @@ class CarbonAwareScheduler(Resource):
                                                   args.original_location)
         d_candidate_routes = get_routes_by_region(args.original_location, d_candidate_regions)
         candidate_regions = list(d_candidate_regions.values())
-        transfer_hop_regions = list(set(hop for route in d_candidate_routes.values() for hop in route))
+        transfer_hop_regions = list(set(hop for route in d_candidate_routes.values() if route for hop in route))
 
         d_region_isos = dict()
         d_region_scores = dict()

@@ -114,7 +114,8 @@ def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str
                     LIMIT 1;""",
             [src_cloud, src_region, dst_cloud, dst_region])
     if not routers_latlon:
-        raise NotFound(f'No route found between {src_cloud_region} and {dst_cloud_region}')
+        current_app.logger.error(f'No route found between {src_cloud_region} and {dst_cloud_region}')
+        return None
 
     route_in_coordinates = [ast.literal_eval(t) for t in routers_latlon.split('|')]
     current_app.logger.debug('route: %s' % route_in_coordinates)
