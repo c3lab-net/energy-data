@@ -99,9 +99,14 @@ def preload_carbon_data(workload: Workload,
     running_intervals = workload.get_running_intervals_in_24h()
     for (start, end) in running_intervals:
         max_delay = workload.schedule.max_delay
-        carbon_data_store[(iso, start, end)] = get_carbon_intensity_list(iso, start, end + max_delay,
+        carbon_data = get_carbon_intensity_list(iso, start, end + max_delay,
                                                         carbon_data_source, use_prediction,
                                                         desired_renewable_ratio)
+        assert len(carbon_data) > 0 and \
+            min([d['timestamp'] for d in carbon_data]) <= start and \
+            max([d['timestamp'] for d in carbon_data]) >= end + max_delay, \
+                f'Not enough carbon data for {iso} to cover time range [{start}, {end}]'
+        carbon_data_store[(iso, start, end)] = carbon_data
     return carbon_data_store
 
 def task_preload_carbon_data(iso: str) -> tuple:
