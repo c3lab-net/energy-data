@@ -116,7 +116,7 @@ def init_parallel_process_candidate(_workload: Workload,
                                     _carbon_data_source: CarbonDataSource,
                                     _use_prediction: bool,
                                     _carbon_data_store: dict,
-                                    _d_candidate_routes: dict[str, RouteInISO]):
+                                    _d_candidate_routes: dict[str, list[CloudRegion]]):
     global workload, carbon_data_source, use_prediction, carbon_data_store, d_candidate_routes
     workload = _workload
     carbon_data_source = _carbon_data_source
@@ -249,6 +249,8 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
                     d_scores[OptimizationFactor.CarbonEmissionFromCompute] = compute_carbon_emissions
                     d_scores[OptimizationFactor.CarbonEmissionFromMigration] = transfer_carbon_emission
                     d_misc['timings'].append(timings)
+                    d_misc['route'] = [f'{hop.name} {hop.gps}' for hop in route]
+                    d_misc['route.hop_count'] = len(route)
                     d_misc['emission_rates']['compute'] = dump_emission_rates(compute_carbon_emission_rates)
                     d_misc['emission_rates']['transfer'] = dump_emission_rates(transfer_carbon_emission_rates)
                     d_misc['emission_rates']['transfer.network'] = dump_emission_rates(transfer_network_carbon_emission_rates)
