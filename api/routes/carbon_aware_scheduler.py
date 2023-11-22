@@ -15,7 +15,7 @@ from webargs.flaskparser import use_args
 from api.helpers.balancing_authority import get_iso_from_gps
 
 from api.helpers.carbon_intensity import calculate_total_carbon_emissions, get_carbon_intensity_list
-from api.models.cloud_location import CloudLocationManager, CloudRegion, get_route_between_region
+from api.models.cloud_location import CloudLocationManager, CloudRegion, get_route_between_cloud_regions
 from api.models.common import CarbonDataSource, Coordinate, ISOName, RouteInISO, get_iso_format_for_carbon_source, identify_iso_format
 from api.models.optimization_engine import OptimizationEngine, OptimizationFactor
 from api.models.wan_bandwidth import load_wan_bandwidth_model
@@ -290,7 +290,7 @@ def get_routes_by_region(original_location: str,
     for candidate_region in d_candidate_regions:
         # TODO: change original_location to be required
         if original_location:
-            d_region_route[candidate_region] = get_route_between_region(original_location, candidate_region)
+            d_region_route[candidate_region] = get_route_between_cloud_regions(original_location, candidate_region)
         else:
             d_region_route[candidate_region] = []
     return d_region_route
