@@ -30,14 +30,14 @@ def _get_carbon_intensity_timeseries(conn: psycopg2.extensions.connection,
             FROM {table}
             WHERE zoneid = %(region)s
                 AND datetime >= (SELECT COALESCE(
-                    (SELECT MAX(datetime) FROM EnergyMixture
+                    (SELECT MAX(datetime) FROM {table}
                         WHERE datetime <= %(start)s AND zoneid = %(region)s),
-                    (SELECT MIN(datetime) FROM EnergyMixture
+                    (SELECT MIN(datetime) FROM {table}
                         WHERE zoneid = %(region)s)))
                 AND datetime <= (SELECT COALESCE(
-                    (SELECT MIN(datetime) FROM EnergyMixture
+                    (SELECT MIN(datetime) FROM {table}
                         WHERE datetime >= %(end)s AND zoneid = %(region)s),
-                    (SELECT MAX(datetime) FROM EnergyMixture
+                    (SELECT MAX(datetime) FROM {table}
                         WHERE zoneid = %(region)s)))
             ORDER BY datetime;""").format(table=sql.Identifier(TABLE_NAME)),
         dict(region=region, start=start, end=end))
