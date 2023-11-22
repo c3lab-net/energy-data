@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import requests
 import configparser
 from typing import Callable
@@ -10,7 +12,7 @@ from time import sleep
 import sys
 import traceback
 import logging
-CONFIG_FILE = "../api/external/electricitymap/electricitymap.ini"
+CONFIG_FILE = "./electricitymap.ini"
 
 
 def init_logging(level=logging.DEBUG):
@@ -31,13 +33,11 @@ def exponential_backoff(max_retries: int = 3,
                     result_func = func(*args, **kwargs)
                     return result_func
                 except Exception as ex:
-                    logging.info(
-                        f"Attempt {retries + 1} failed: {ex}")
+                    logging.warning(f"Attempt {retries + 1} failed: {ex}")
                     if retries < max_retries and should_retry(ex):
                         delay = (base_delay_s * 2 ** retries +
                                  random.uniform(0, 1))
-                        logging.info(
-                            f"Retrying in {delay:.2f} seconds...")
+                        logging.warning(f"Retrying in {delay:.2f} seconds...")
                         sleep(delay)
                         retries += 1
                     else:
@@ -53,8 +53,7 @@ def get_auth_token():
         parser.read(config_filepath)
         return parser['auth']['token']
     except Exception as ex:
-        raise ValueError(
-            f'Failed to retrieve watttime credentials: {ex}') from ex
+        raise ValueError(f'Failed to retrieve watttime credentials: {ex}') from ex
 
 
 def prepare_insert_query(data):
@@ -82,40 +81,44 @@ def prepare_insert_query(data):
 
 
 @exponential_backoff(should_retry=lambda ex: ex.response.status_code == 429)
-def fetch(zone):
+def fetch(zone, session: requests.Session):
+    logging.info(f"Fetching {zone} carbon data from electricity map API ...")
     url = f"https://api-access.electricitymaps.com/free-tier/carbon-intensity/history?zone={zone}"
     headers = {
         "auth-token": get_auth_token()
     }
 
-    history_response = requests.get(url, headers=headers)
+    history_response = session.get(url, headers=headers)
     history_response.raise_for_status()
     return history_response
 
 
 def update(conn, history_response_json):
-    if 'history' in history_response_json:
-        for history in history_response_json['history']:
-            query, data = prepare_insert_query(history)
-            with conn, conn.cursor() as cur:
-                cur.execute(query, data)
+    logging.info(f"Updating database ...")
+    assert 'history' in history_response_json, "history not found in response"
+    for history in history_response_json['history']:
+        query, data = prepare_insert_query(history)
+        with conn, conn.cursor() as cur:
+            cur.execute(query, data)
 
 
-def fetch_and_update(conn, zone):
+def fetch_and_update(zone, session: requests.Session, conn):
     try:
-        history_response = fetch(zone)
+        logging.info(f"Working on {zone} ...")
+        history_response = fetch(zone, session)
         assert history_response.ok, "Request failed %d: %s" % (
             history_response.status_code, history_response.text)
         history_response_json = history_response.json()
 
         update(conn, history_response_json)
-    except Exception as ex:  # Catch exceptions from fetch and update
-        print(datetime.now().isoformat(),
-              f"Error occurred: {ex}", file=sys.stderr)
-        print(traceback.format_exc(), file=sys.stderr)
+    except Exception as ex:
+        logging.error(f"Error occurred while processing {zone}: {ex}")
+        logging.error(traceback.format_exc())
 
 
 def get_all_electricity_zones():
+    logging.info(f"Getting all zones from electricity map API ...")
+
     url = "https://api-access.electricitymaps.com/free-tier/zones"
     headers = {
         "auth-token": get_auth_token()
@@ -126,13 +129,17 @@ def get_all_electricity_zones():
     assert zone_response.ok, f"Error in EMap request for getting all zones in electricity map ({zone_response.status_code}): {zone_response.text}"
 
     zone_response_json = zone_response.json()
+    logging.info(f"Got {len(zone_response_json)} zones from electricity map API ...")
 
     return zone_response_json.keys()
 
 
 if __name__ == '__main__':
     init_logging(level=logging.INFO)
+
+    session = requests.Session()
     conn = get_db_connection()
-    for item in get_all_electricity_zones():
-        fetch_and_update(conn, item)
+
+    for zone in get_all_electricity_zones():
+        fetch_and_update(zone, session, conn)
     conn.close()
