@@ -16,12 +16,21 @@ import logging
 
 CONFIG_FILE = "electricitymap.ini"
 
+class InfoFilter(logging.Filter):
+    def filter(self, rec):
+        return rec.levelno in (logging.DEBUG, logging.INFO)
 
 def init_logging(level=logging.DEBUG):
+    h1 = logging.StreamHandler(sys.stdout)
+    h1.setLevel(logging.DEBUG)
+    h1.addFilter(InfoFilter())
+    h2 = logging.StreamHandler()
+    h2.setLevel(logging.WARNING)
+
     logging.basicConfig(level=level,
-                        stream=sys.stderr,
                         format='%(asctime)s %(levelname)-8s %(message)s',
-                        datefmt='%Y-%m-%d %H:%M:%S')
+                        datefmt='%Y-%m-%d %H:%M:%S',
+                        handlers=[h1, h2])
 
 
 def exponential_backoff(max_retries: int = 3,
