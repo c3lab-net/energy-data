@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 import requests
 import configparser
 from typing import Callable
@@ -12,7 +13,8 @@ from time import sleep
 import sys
 import traceback
 import logging
-CONFIG_FILE = "./electricitymap.ini"
+
+CONFIG_FILE = "electricitymap.ini"
 
 
 def init_logging(level=logging.DEBUG):
@@ -49,7 +51,7 @@ def exponential_backoff(max_retries: int = 3,
 def get_auth_token():
     try:
         parser = configparser.ConfigParser()
-        config_filepath = CONFIG_FILE
+        config_filepath = os.path.join(os.path.dirname(os.path.realpath(__file__)), CONFIG_FILE)
         parser.read(config_filepath)
         return parser['auth']['token']
     except Exception as ex:
