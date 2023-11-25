@@ -156,6 +156,8 @@ def get_per_hop_transfer_power_in_watts(route: CloudRegion, transfer_rate: Rate)
 def get_carbon_emission_rates_as_pd_series(iso: ISOName, start: datetime, end: datetime, power_in_watts: float) -> pd.Series:
     l_carbon_intensity = get_preloaded_carbon_data(iso, start, end)
     df = pd.DataFrame(l_carbon_intensity)
+    # Force conversion using UTC is needed to handle multiple timezones
+    df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
     df.set_index('timestamp', inplace=True)
     df.sort_index(inplace=True)
 
