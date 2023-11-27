@@ -488,8 +488,8 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
                 step_t1 = T4 - T0   # Large enough so it's bigger than step_t2, so this is not considered
             step_t2 = next((op for op in OPs[2] if op > t2), T2_MAX) - t2
             if integrals[3]:
-                # Moving t2 might disable the current optimal t3, and the minimal distance is from current optimal_t3 to the next OP.
-                step_t3 = next((op for op in OPs[3] if op > optimal_t3), T3_MAX) - optimal_t3
+                # Moving t2 might disable the current optimal t3, and the minimal distance is from current t3_min to the next OP.
+                step_t3 = next((op for op in OPs[3] if op > t3_min), T3_MAX) - t3_min
             else:
                 step_t3 = T4 - T0   # Large enough so it's bigger than step_t2, so this is not considered
             t2 += max(min(step_t1, step_t2, step_t3), 1) # Make sure step is at least 1
