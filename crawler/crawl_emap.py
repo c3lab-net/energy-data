@@ -18,14 +18,14 @@ CONFIG_FILE = "electricitymap.ini"
 
 class InfoFilter(logging.Filter):
     def filter(self, rec):
-        return rec.levelno in (logging.DEBUG, logging.INFO)
+        return rec.levelno in (logging.DEBUG, logging.INFO, logging.WARNING)
 
 def init_logging(level=logging.DEBUG):
     h1 = logging.StreamHandler(sys.stdout)
     h1.setLevel(logging.DEBUG)
     h1.addFilter(InfoFilter())
     h2 = logging.StreamHandler()
-    h2.setLevel(logging.WARNING)
+    h2.setLevel(logging.ERROR)
 
     logging.basicConfig(level=level,
                         format='%(asctime)s %(levelname)-8s %(message)s',
