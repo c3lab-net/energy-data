@@ -22,6 +22,11 @@ class ScheduleType(Enum):
     ONETIME = "onetime"
 
 
+class CarbonAccountingMode(str, Enum):
+    ComputeOnly = "compute-only"
+    ComputeAndNetwork = "compute-and-network"
+
+
 @dataclass
 class WorkloadSchedule:
     type: ScheduleType = field_enum(ScheduleType)
@@ -141,6 +146,8 @@ class Workload:
     watts_per_core: float = field(default=DEFAULT_CPU_POWER_PER_CORE)
     core_count: float = field(default=1.)
 
+    carbon_accounting_mode: CarbonAccountingMode = field_enum(CarbonAccountingMode, CarbonAccountingMode.ComputeOnly)
+
     @validates_schema
     def validate_schema(self, data, **kwargs):
         errors = dict()
@@ -156,6 +163,10 @@ class Workload:
             sub_errors = _validate_locations(data['candidate_locations'])
             if sub_errors:
                 errors['candidate_locations'] = sub_errors
+        if data.get('carbon_accounting_mode', None) is CarbonAccountingMode.ComputeAndNetwork and \
+                not data.get('original_location', None):
+            errors['original_location'] = \
+                f'Must provide original_location for carbon_accounting_mode {CarbonAccountingMode.ComputeAndNetwork}'
         if data.get('original_location', None):
             sub_errors = _validate_location_is_defined(data['original_location'], data['candidate_locations'])
             if sub_errors:

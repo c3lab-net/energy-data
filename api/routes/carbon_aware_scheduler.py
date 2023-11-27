@@ -19,7 +19,7 @@ from api.models.cloud_location import CloudLocationManager, CloudRegion, get_rou
 from api.models.common import CarbonDataSource, Coordinate, ISOName, RouteInISO, get_iso_format_for_carbon_source, identify_iso_format
 from api.models.optimization_engine import OptimizationEngine, OptimizationFactor
 from api.models.wan_bandwidth import load_wan_bandwidth_model
-from api.models.workload import DEFAULT_DC_PUE, DEFAULT_NETWORK_PUE, DEFAULT_STORAGE_POWER, CloudLocation, Workload
+from api.models.workload import DEFAULT_DC_PUE, DEFAULT_NETWORK_PUE, DEFAULT_STORAGE_POWER, CarbonAccountingMode, CloudLocation, Workload
 from api.models.dataclass_extensions import *
 from api.util import Rate, RateUnit, Size, SizeUnit, round_up
 
@@ -41,14 +41,12 @@ def get_candidate_regions(candidate_providers: list[str], candidate_locations: l
         if candidate_providers:
             candidate_regions = g_cloud_manager.get_all_cloud_regions(candidate_providers)
             d_candidate_regions = { str(region): region for region in candidate_regions }
-            # TODO: change original_location to be required
             if original_location:
                 assert original_location in d_candidate_regions, "Original location not defined in candidate regions"
             return d_candidate_regions
 
         d_candidate_regions = {}
-        # TODO: change original_location to be required
-        if not original_location:
+        if original_location:
             candidate_locations += [CloudLocation(original_location)]
         for location in candidate_locations:
             if location.id in d_candidate_regions:
@@ -294,14 +292,17 @@ def task_process_candidate(region: CloudRegion) -> tuple:
         return region_name, iso, None, None, str(ex), traceback.format_exc()
 
 def get_routes_by_region(original_location: str,
-                                        d_candidate_regions: dict[str, CloudRegion]) -> dict[str, list[CloudRegion]]:
-    d_region_route = {}
+                         d_candidate_regions: dict[str, CloudRegion],
+                         carbon_accounting_mode: CarbonAccountingMode) -> dict[str, list[CloudRegion]]:
+    d_region_route: dict[str, list[CloudRegion]] = {}
     for candidate_region in d_candidate_regions:
-        # TODO: change original_location to be required
-        if original_location:
-            d_region_route[candidate_region] = get_route_between_cloud_regions(original_location, candidate_region)
-        else:
-            d_region_route[candidate_region] = []
+        match carbon_accounting_mode:
+            case CarbonAccountingMode.ComputeAndNetwork:
+                d_region_route[candidate_region] = get_route_between_cloud_regions(original_location, candidate_region)
+            case CarbonAccountingMode.ComputeOnly:
+                d_region_route[candidate_region] = []
+            case _:
+                raise NotImplementedError('Unknown carbon_accounting_mode')
     return d_region_route
 
 def assign_iso_to_route_hops(d_candidate_routes: dict[str, list[CloudRegion]],
@@ -334,7 +335,8 @@ class CarbonAwareScheduler(Resource):
         d_candidate_regions = get_candidate_regions(args.candidate_providers,
                                                   args.candidate_locations,
                                                   args.original_location)
-        d_candidate_routes = get_routes_by_region(args.original_location, d_candidate_regions)
+        d_candidate_routes = get_routes_by_region(args.original_location, d_candidate_regions,
+                                                  args.carbon_accounting_mode)
         candidate_regions = list(d_candidate_regions.values())
         transfer_hop_regions = list(set(hop for route in d_candidate_routes.values() if route for hop in route))
 
