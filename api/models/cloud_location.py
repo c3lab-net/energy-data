@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 
+import ast
 from dataclasses import dataclass
 import os
 from pathlib import Path
 from flask import current_app
 from werkzeug.exceptions import NotFound
 
-from api.models.common import Coordinate, RouteInCoordinate
-from api.util import load_yaml_data
+from api.models.common import Coordinate
+from api.util import get_psql_connection, load_yaml_data, psql_execute_scalar
 
 @dataclass(unsafe_hash=True)
 class CloudRegion:
@@ -93,25 +94,37 @@ class CloudLocationManager:
                 return region
         raise NotFound('Unknown region "%s" for provider "%s".' % (region_code, cloud_provider))
 
-def get_route_between_region(src_region: str, dst_region: str) -> list[RouteInCoordinate]:
-    if src_region == dst_region:
+def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str) -> list[CloudRegion]:
+    """Get the list of intermediate hops between two cloud regions."""
+    if src_cloud_region == dst_cloud_region:
         return []
-    # TODO: look up from database
-    if (src_region, dst_region) in [('AWS:us-west-1', 'AWS:us-east-1'),
-                                    ('Azure:westus', 'Azure:eastus')]:
-        # ['CAISO_NORTH', 'SPP_KANSAS', 'PJM_DC']
-        route_in_coordinates = [(37.2379, -121.7946), (37.751, -97.822), (39.0127, -77.5342)]
-    elif (src_region, dst_region) in [('AWS:us-east-1', 'AWS:us-west-1'),
-                                    ('Azure:eastus', 'Azure:westus')]:
-        # ['PJM_DC', 'SPP_KANSAS', 'CAISO_NORTH']
-        route_in_coordinates = [(39.0127, -77.5342), (37.751, -97.822), (37.2379, -121.7946)]
-    else:
-        raise NotImplementedError('TODO: look up from database')
+
+    current_app.logger.debug('get_route_between_cloud_regions(%s, %s)' % (src_cloud_region, dst_cloud_region))
+
+    # records in database are in lower format
+    (src_cloud, src_region) = src_cloud_region.lower().split(':', 1)
+    (dst_cloud, dst_region) = dst_cloud_region.lower().split(':', 1)
+    with get_psql_connection() as conn:
+        cursor = conn.cursor()
+        routers_latlon: list[tuple[str]] = psql_execute_scalar(
+            cursor,
+            """SELECT routers_latlon FROM cloud_region_best_route
+                WHERE src_cloud = %s AND src_region = %s
+                    AND dst_cloud = %s AND dst_region = %s
+                    LIMIT 1;""",
+            [src_cloud, src_region, dst_cloud, dst_region])
+    if not routers_latlon:
+        current_app.logger.error(f'No route found between {src_cloud_region} and {dst_cloud_region}')
+        return None
+
+    route_in_coordinates = [ast.literal_eval(t) for t in routers_latlon.split('|')]
+    current_app.logger.debug('route: %s' % route_in_coordinates)
 
     route: list[CloudRegion] = []
     for i in range(len(route_in_coordinates)):
         coordinate = route_in_coordinates[i]
-        provider = f'{src_region}->{dst_region}'
+        provider = f'{src_cloud_region}->{dst_cloud_region}'
         cloud_region = CloudRegion(provider, f'hop{i}', f'Hop {i} of {provider}', None, coordinate)
         route.append(cloud_region)
+
     return route

@@ -109,7 +109,7 @@ def get_iso_from_gps(latitude: float, longitude: float, iso_format: IsoFormat) -
 
 # def get_all_balancing_authorities():
 #     """Return a list of all balancing authorities for which we have collect data."""
-#     conn = get_psql_connection()
-#     cursor = conn.cursor()
-#     results: list[tuple[str]] = psql_execute_list(cursor, "SELECT DISTINCT region FROM EnergyMixture ORDER BY region;")
-#     return [row[0] for row in results]  # one column per row
+#     with get_psql_connection() as conn:
+#         cursor = conn.cursor()
+#         results: list[tuple[str]] = psql_execute_list(cursor, "SELECT DISTINCT region FROM EnergyMixture ORDER BY region;")
+#         return [row[0] for row in results]  # one column per row

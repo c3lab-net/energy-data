@@ -30,14 +30,14 @@ def _get_carbon_intensity_timeseries(conn: psycopg2.extensions.connection,
             FROM {table}
             WHERE zoneid = %(region)s
                 AND datetime >= (SELECT COALESCE(
-                    (SELECT MAX(datetime) FROM EnergyMixture
+                    (SELECT MAX(datetime) FROM {table}
                         WHERE datetime <= %(start)s AND zoneid = %(region)s),
-                    (SELECT MIN(datetime) FROM EnergyMixture
+                    (SELECT MIN(datetime) FROM {table}
                         WHERE zoneid = %(region)s)))
                 AND datetime <= (SELECT COALESCE(
-                    (SELECT MIN(datetime) FROM EnergyMixture
+                    (SELECT MIN(datetime) FROM {table}
                         WHERE datetime >= %(end)s AND zoneid = %(region)s),
-                    (SELECT MAX(datetime) FROM EnergyMixture
+                    (SELECT MAX(datetime) FROM {table}
                         WHERE zoneid = %(region)s)))
             ORDER BY datetime;""").format(table=sql.Identifier(TABLE_NAME)),
         dict(region=region, start=start, end=end))
@@ -77,7 +77,7 @@ def fetch_prediction(region: str, start: datetime, end: datetime) -> list[dict]:
 @carbon_data_cache.memoize()
 def fetch_emissions(region: str, start: datetime, end: datetime) -> list[dict]:
     current_app.logger.debug(f'fetch_emissions({region}, {start}, {end})')
-    conn = get_psql_connection()
-    validate_region_exists(conn, region, TABLE_NAME, REGION_COLUMN)
-    validate_time_range(conn, region, start, end, TABLE_NAME, REGION_COLUMN)
-    return _get_carbon_intensity_timeseries(conn, region, start, end)
+    with get_psql_connection() as conn:
+        validate_region_exists(conn, region, TABLE_NAME, REGION_COLUMN)
+        validate_time_range(conn, region, start, end, TABLE_NAME, REGION_COLUMN)
+        return _get_carbon_intensity_timeseries(conn, region, start, end)

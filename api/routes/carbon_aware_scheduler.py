@@ -15,7 +15,7 @@ from webargs.flaskparser import use_args
 from api.helpers.balancing_authority import get_iso_from_gps
 
 from api.helpers.carbon_intensity import calculate_total_carbon_emissions, get_carbon_intensity_list
-from api.models.cloud_location import CloudLocationManager, CloudRegion, get_route_between_region
+from api.models.cloud_location import CloudLocationManager, CloudRegion, get_route_between_cloud_regions
 from api.models.common import CarbonDataSource, Coordinate, ISOName, RouteInISO, get_iso_format_for_carbon_source, identify_iso_format
 from api.models.optimization_engine import OptimizationEngine, OptimizationFactor
 from api.models.wan_bandwidth import load_wan_bandwidth_model
@@ -99,9 +99,14 @@ def preload_carbon_data(workload: Workload,
     running_intervals = workload.get_running_intervals_in_24h()
     for (start, end) in running_intervals:
         max_delay = workload.schedule.max_delay
-        carbon_data_store[(iso, start, end)] = get_carbon_intensity_list(iso, start, end + max_delay,
+        carbon_data = get_carbon_intensity_list(iso, start, end + max_delay,
                                                         carbon_data_source, use_prediction,
                                                         desired_renewable_ratio)
+        assert len(carbon_data) > 0 and \
+            min([d['timestamp'] for d in carbon_data]) <= start and \
+            max([d['timestamp'] for d in carbon_data]) >= end + max_delay, \
+                f'Not enough carbon data for {iso} to cover time range [{start}, {end}]'
+        carbon_data_store[(iso, start, end)] = carbon_data
     return carbon_data_store
 
 def task_preload_carbon_data(iso: str) -> tuple:
@@ -116,7 +121,7 @@ def init_parallel_process_candidate(_workload: Workload,
                                     _carbon_data_source: CarbonDataSource,
                                     _use_prediction: bool,
                                     _carbon_data_store: dict,
-                                    _d_candidate_routes: dict[str, RouteInISO]):
+                                    _d_candidate_routes: dict[str, list[CloudRegion]]):
     global workload, carbon_data_source, use_prediction, carbon_data_store, d_candidate_routes
     workload = _workload
     carbon_data_source = _carbon_data_source
@@ -215,6 +220,8 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
                 running_intervals = workload.get_running_intervals_in_24h()
                 max_delay = workload.schedule.max_delay
                 route = d_candidate_routes[str(region)]
+                if route is None:
+                    raise ValueError(f'No route found for {region}')
                 score = 0
                 d_misc['timings'] = []
                 d_misc['emission_rates'] = {}
@@ -249,6 +256,8 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
                     d_scores[OptimizationFactor.CarbonEmissionFromCompute] = compute_carbon_emissions
                     d_scores[OptimizationFactor.CarbonEmissionFromMigration] = transfer_carbon_emission
                     d_misc['timings'].append(timings)
+                    d_misc['route'] = [f'{hop.name} {hop.gps}' for hop in route]
+                    d_misc['route.hop_count'] = len(route)
                     d_misc['emission_rates']['compute'] = dump_emission_rates(compute_carbon_emission_rates)
                     d_misc['emission_rates']['transfer'] = dump_emission_rates(transfer_carbon_emission_rates)
                     d_misc['emission_rates']['transfer.network'] = dump_emission_rates(transfer_network_carbon_emission_rates)
@@ -290,7 +299,7 @@ def get_routes_by_region(original_location: str,
     for candidate_region in d_candidate_regions:
         # TODO: change original_location to be required
         if original_location:
-            d_region_route[candidate_region] = get_route_between_region(original_location, candidate_region)
+            d_region_route[candidate_region] = get_route_between_cloud_regions(original_location, candidate_region)
         else:
             d_region_route[candidate_region] = []
     return d_region_route
@@ -299,11 +308,16 @@ def assign_iso_to_route_hops(d_candidate_routes: dict[str, list[CloudRegion]],
                              d_transit_hop_iso: dict[Coordinate, ISOName]) -> None:
     """Assign ISO to transit hops in the route."""
     for candidate in d_candidate_routes:
+        if d_candidate_routes[candidate] is None:
+            continue
         for i in range(len(d_candidate_routes[candidate])):
             hop = d_candidate_routes[candidate][i]
             if hop.iso:
                 continue
-            d_candidate_routes[candidate][i].iso = d_transit_hop_iso[hop.gps]
+            if hop.gps in d_transit_hop_iso:
+                d_candidate_routes[candidate][i].iso = d_transit_hop_iso[hop.gps]
+            else:
+                d_candidate_routes[candidate][i].iso = None
 
 class CarbonAwareScheduler(Resource):
     @use_args(marshmallow_dataclass.class_schema(Workload)())
@@ -322,7 +336,7 @@ class CarbonAwareScheduler(Resource):
                                                   args.original_location)
         d_candidate_routes = get_routes_by_region(args.original_location, d_candidate_regions)
         candidate_regions = list(d_candidate_regions.values())
-        transfer_hop_regions = list(set(hop for route in d_candidate_routes.values() for hop in route))
+        transfer_hop_regions = list(set(hop for route in d_candidate_routes.values() if route for hop in route))
 
         d_region_isos = dict()
         d_region_scores = dict()

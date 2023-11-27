@@ -2,30 +2,344 @@
 public_clouds:
 - provider: AWS
   regions:
-  - code: us-west-1
-    name: US West (N. California)
-    iso: watttime:CAISO_NORTH
+  - code: af-south-1
+    name: Africa (Cape Town)
+    iso: ''
     gps:
-    - 37.00578
-    - -121.56828
-  - code: us-west-2
-    name: US West (Oregon)
-    iso: watttime:PACW
+    - -34.0486
+    - 18.4811
+  # - code: ap-east-1
+  #   name: Asia Pacific (Hong Kong)
+  #   iso: ''
+  #   gps:
+  #   - 22.2578
+  #   - 114.1657
+  - code: ap-northeast-1
+    name: Asia Pacific (Tokyo)
+    iso: ''
     gps:
-    - 45.84041
-    - -119.28946
+    - 35.6893
+    - 139.6899
+  - code: ap-northeast-2
+    name: Asia Pacific (Seoul)
+    iso: ''
+    gps:
+    - 37.4565
+    - 126.7052
+  - code: ap-northeast-3
+    name: Asia Pacific (Osaka)
+    iso: ''
+    gps:
+    - 34.6869
+    - 135.5211
+  - code: ap-south-1
+    name: Asia Pacific (Mumbai)
+    iso: ''
+    gps:
+    - 19.0748
+    - 72.8856
+  - code: ap-southeast-1
+    name: Asia Pacific (Singapore)
+    iso: ''
+    gps:
+    - 1.3354
+    - 103.8056
+  - code: ap-southeast-2
+    name: Asia Pacific (Sydney)
+    iso: ''
+    gps:
+    - -33.8601
+    - 151.2101
+  - code: ca-central-1
+    name: Canada (Central)
+    iso: ''
+    gps:
+    - 45.4994
+    - -73.5703
+  # - code: cn-north-1
+  #   name: China (Beijing)
+  #   iso: ''
+  #   gps:
+  #   - 39.9075
+  #   - 116.3972
+  # - code: cn-northwest-1
+  #   name: China (Ningxia)
+  #   iso: ''
+  #   gps:
+  #   - 37.2534
+  #   - 105.9976
+  - code: eu-central-1
+    name: Europe (Frankfurt)
+    iso: ''
+    gps:
+    - 50.1188
+    - 8.6843
+  - code: eu-north-1
+    name: Europe (Stockholm)
+    iso: ''
+    gps:
+    - 59.3333
+    - 18.05
+  - code: eu-south-1
+    name: Europe (Milan)
+    iso: ''
+    gps:
+    - 45.4742
+    - 9.1994
+  - code: eu-west-1
+    name: Europe (Ireland)
+    iso: ''
+    gps:
+    - 53.3382
+    - -6.2591
+  - code: eu-west-2
+    name: Europe (London)
+    iso: ''
+    gps:
+    - 51.5164
+    - -0.093
+  - code: eu-west-3
+    name: Europe (Paris)
+    iso: ''
+    gps:
+    - 48.8323
+    - 2.4075
+  # - code: me-south-1
+  #   name: Middle East (Bahrain)
+  #   iso: ''
+  #   gps:
+  #   - 26.0022
+  #   - 50.5521
+  - code: sa-east-1
+    name: South America (Sao Paulo)
+    iso: ''
+    gps:
+    - -23.5335
+    - -46.6359
   - code: us-east-1
     name: US East (N. Virginia)
-    iso: watttime:PJM_SOUTHWEST_OH
+    iso: ''
     gps:
-    - 39.983334
-    - -82.98333
+    - 39.0127
+    - -77.5342
   - code: us-east-2
     name: US East (Ohio)
-    iso: watttime:PJM_DC
+    iso: ''
     gps:
-    - 39.040283
-    - -77.485165
+    - 39.9625
+    - -83.0061
+  # - code: us-gov-east-1
+  #   name: AWS GovCloud (US-East)
+  #   iso: ''
+  #   gps:
+  #   - 39.9625
+  #   - -83.0061
+  # - code: us-gov-west-1
+  #   name: AWS GovCloud (US-West)
+  #   iso: ''
+  #   gps:
+  #   - 45.8234
+  #   - -119.7257
+  - code: us-west-1
+    name: US West (N. California)
+    iso: ''
+    gps:
+    - 37.2379
+    - -121.7946
+  - code: us-west-2
+    name: US West (Oregon)
+    iso: ''
+    gps:
+    - 45.8234
+    - -119.7257
+- provider: gcloud
+  regions:
+  - code: asia-east1
+    name: Changhua County, Taiwan, APAC
+    iso: ''
+    gps:
+    - 25.0504
+    - 121.5324
+  # - code: asia-east2
+  #   name: Hong Kong, APAC
+  #   iso: ''
+  #   gps:
+  #   - 22.2908
+  #   - 114.1501
+  - code: asia-northeast1
+    name: Tokyo, Japan, APAC
+    iso: ''
+    gps:
+    - 35.6893
+    - 139.6899
+  - code: asia-northeast2
+    name: Osaka, Japan, APAC
+    iso: ''
+    gps:
+    - 34.6869
+    - 135.5211
+  - code: asia-northeast3
+    name: Seoul, South Korea, APAC
+    iso: ''
+    gps:
+    - 37.5794
+    - 126.9754
+  - code: asia-south1
+    name: Mumbai, India, APAC
+    iso: ''
+    gps:
+    - 19.0748
+    - 72.8856
+  - code: asia-south2
+    name: Delhi, India, APAC
+    iso: ''
+    gps:
+    - 28.6328
+    - 77.2204
+  - code: asia-southeast1
+    name: Jurong West, Singapore, APAC
+    iso: ''
+    gps:
+    - 1.3354
+    - 103.8056
+  # - code: asia-southeast2
+  #   name: Jakarta, Indonesia, APAC
+  #   iso: ''
+  #   gps:
+  #   - -6.1741
+  #   - 106.8296
+  - code: australia-southeast1
+    name: Sydney, Australia, APAC
+    iso: ''
+    gps:
+    - -33.8601
+    - 151.2101
+  - code: australia-southeast2
+    name: Melbourne, Australia, APAC
+    iso: ''
+    gps:
+    - -37.8159
+    - 144.9669
+  - code: europe-central2
+    name: Warsaw, Poland, Europe
+    iso: ''
+    gps:
+    - 52.2068
+    - 20.9602
+  - code: europe-north1
+    name: Hamina, Finland, Europe
+    iso: ''
+    gps:
+    - 61.0681
+    - 28.1733
+  - code: europe-west1
+    name: St. Ghislain, Belgium, Europe
+    iso: ''
+    gps:
+    - 50.8847
+    - 4.5049
+  - code: europe-west2
+    name: London, England, Europe
+    iso: ''
+    gps:
+    - 51.5164
+    - -0.093
+  - code: europe-west3
+    name: Frankfurt, Germany, Europe
+    iso: ''
+    gps:
+    - 50.1188
+    - 8.6843
+  - code: europe-west4
+    name: Eemshaven, Netherlands, Europe
+    iso: ''
+    gps:
+    - 53.2286
+    - 6.5743
+  - code: europe-west6
+    name: Zurich, Switzerland, Europe
+    iso: ''
+    gps:
+    - 47.3682
+    - 8.5671
+  - code: northamerica-northeast1
+    name: Montreal, Quebec, North America
+    iso: ''
+    gps:
+    - 45.4994
+    - -73.5703
+  - code: northamerica-northeast2
+    name: Toronto, Ontario, North America
+    iso: ''
+    gps:
+    - 43.6655
+    - -79.4204
+  - code: southamerica-east1
+    name: Osasco, Sao Paulo, Brazil, South America
+    iso: ''
+    gps:
+    - -23.5335
+    - -46.6359
+  - code: southamerica-west1
+    name: Santiago, Chile, South America
+    iso: ''
+    gps:
+    - -33.4513
+    - -70.6653
+  - code: us-central1
+    name: Council Bluffs, Iowa, North America
+    iso: ''
+    gps:
+    - 41.2615
+    - -95.8304
+  # - code: us-central2
+  #   name: gcloud:us-central2
+  #   iso: ''
+  #   gps:
+  #   - 36.1476
+  #   - -95.9761
+  - code: us-east1
+    name: Moncks Corner, South Carolina, North America
+    iso: ''
+    gps:
+    - 32.8929
+    - -80.0458
+  - code: us-east4
+    name: Ashburn, Virginia, North America
+    iso: ''
+    gps:
+    - 38.9057
+    - -77.0319
+  # - code: us-east7
+  #   name: gcloud:us-east7
+  #   iso: ''
+  #   gps:
+  #   - 33.5226
+  #   - -86.8033
+  - code: us-west1
+    name: The Dalles, Oregon, North America
+    iso: ''
+    gps:
+    - 45.5999
+    - -121.1871
+  - code: us-west2
+    name: Los Angeles, California, North America
+    iso: ''
+    gps:
+    - 34.0544
+    - -118.2441
+  - code: us-west3
+    name: Salt Lake City, Utah, North America
+    iso: ''
+    gps:
+    - 40.6566
+    - -111.8907
+  - code: us-west4
+    name: Las Vegas, Nevada, North America
+    iso: ''
+    gps:
+    - 36.1685
+    - -115.1164
 - provider: Azure
   regions:
   - code: australiaeast
