@@ -146,6 +146,7 @@ class Workload:
     watts_per_core: float = field(default=DEFAULT_CPU_POWER_PER_CORE)
     core_count: float = field(default=1.)
 
+    use_new_optimization: bool = field(default=True)
     carbon_accounting_mode: CarbonAccountingMode = field_enum(CarbonAccountingMode, CarbonAccountingMode.ComputeOnly)
 
     @validates_schema

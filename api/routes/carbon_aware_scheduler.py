@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from datetime import timedelta, timezone
 import json
+from math import ceil
 from multiprocessing import Pool
 import traceback
 from typing import Any
@@ -14,7 +15,7 @@ from pandas.tseries.frequencies import to_offset
 from webargs.flaskparser import use_args
 from api.helpers.balancing_authority import get_iso_from_gps
 
-from api.helpers.carbon_intensity import calculate_total_carbon_emissions, get_carbon_intensity_list
+from api.helpers.carbon_intensity import get_carbon_intensity_list, calculate_total_carbon_emissions_linear, calculate_total_carbon_emissions_naive
 from api.models.cloud_location import CloudLocationManager, CloudRegion, get_route_between_cloud_regions
 from api.models.common import CarbonDataSource, Coordinate, ISOName, RouteInISO, get_iso_format_for_carbon_source, identify_iso_format
 from api.models.optimization_engine import OptimizationEngine, OptimizationFactor
@@ -142,7 +143,9 @@ def get_transfer_rate(route: list[CloudRegion], start: datetime, end: datetime, 
 
 def get_transfer_time(data_size_gb: float, transfer_rate: Rate) -> timedelta:
     data_size = Size(data_size_gb, SizeUnit.GB)
-    return data_size / transfer_rate
+    transfer_time: timedelta = (data_size / transfer_rate)
+    # Round to whole seconds for a later algorithm.
+    return timedelta(seconds=ceil(transfer_time.total_seconds()))
 
 def get_per_hop_transfer_power_in_watts(route: CloudRegion, transfer_rate: Rate) -> float:
     # NOTE: only consider routers for now.
@@ -153,11 +156,14 @@ def get_per_hop_transfer_power_in_watts(route: CloudRegion, transfer_rate: Rate)
 def get_carbon_emission_rates_as_pd_series(iso: ISOName, start: datetime, end: datetime, power_in_watts: float) -> pd.Series:
     l_carbon_intensity = get_preloaded_carbon_data(iso, start, end)
     df = pd.DataFrame(l_carbon_intensity)
+    # Force conversion using UTC is needed to handle multiple timezones
+    df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
     df.set_index('timestamp', inplace=True)
+    df.sort_index(inplace=True)
 
-    # Only consider hourly data
-    df = df.loc[df.index.minute == 0]
-    ds = df['carbon_intensity'].sort_index()
+    # Only consider hourly data, using average carbon intensity.
+    df = df.resample('H').mean()
+    ds = df['carbon_intensity']
     # Conversion: gCO2/kWh * W * 1/(1000*3600) kh/s = gCO2/s
     ds = ds * power_in_watts / (1000 * 3600)
     ds.sort_index(inplace=True)
@@ -169,8 +175,12 @@ def get_carbon_emission_rates_as_pd_series(iso: ISOName, start: datetime, end: d
         ds_freq = to_offset(np.diff(ds.index).min())
         # pd.infer_freq() only works with perfectly regular frequency
         # ds_freq = to_offset(pd.infer_freq(ds.index))
+    ds.ffill(inplace=True)
     end_time_of_series = ds.index.max() + ds_freq
     ds[end_time_of_series.to_pydatetime()] = 0.
+
+    assert ds.index.min() <= start and end <= ds.index.max(), \
+        f'Carbon data not available for iso {iso} for the entire time range [{start}, {end}]'
 
     return ds
 
@@ -240,6 +250,11 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
                     (transfer_carbon_emission_rates, \
                         transfer_network_carbon_emission_rates, \
                         transfer_endpoint_carbon_emission_rates) = all_transfer_carbon_emission_rates
+
+                    if workload.use_new_optimization:
+                        calculate_total_carbon_emissions = calculate_total_carbon_emissions_linear
+                    else:
+                        calculate_total_carbon_emissions = calculate_total_carbon_emissions_naive
 
                     runtime = end - start
                     (compute_carbon_emissions, transfer_carbon_emission), timings = \
@@ -389,7 +404,7 @@ class CarbonAwareScheduler(Resource):
             result = pool.map(task_process_candidate, candidate_regions)
         for (region_name, iso, scores, d_misc, ex, stack_trace) in result:
             d_region_isos[region_name] = iso
-            if not ex:
+            if not (ex or stack_trace):
                 scores[OptimizationFactor.EnergyUsage + '-unit'] = 'kWh'
                 scores[OptimizationFactor.CarbonEmission + '-unit'] = 'gCO2'
                 d_region_scores[region_name] = scores

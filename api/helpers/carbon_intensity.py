@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import math
+from bisect import bisect_left
 import time
 import numpy as np
 import pandas as pd
@@ -13,6 +14,9 @@ from api.helpers.carbon_intensity_c3lab import get_carbon_intensity_list as get_
 from api.helpers.carbon_intensity_azure import get_carbon_intensity_list as get_carbon_intensity_list_azure
 from api.helpers.carbon_intensity_emap import get_carbon_intensity_list as get_carbon_intensity_list_emap
 from api.models.common import CarbonDataSource
+
+
+FLOAT_PRECISION = 8
 
 
 def get_carbon_intensity_list(iso: str, start: datetime, end: datetime,
@@ -65,7 +69,7 @@ def get_carbon_intensity_interval(timestamps: list[datetime]) -> timedelta:
     return values[np.argmax(counts)]
 
 
-def calculate_total_carbon_emissions(start: datetime, runtime: timedelta,
+def calculate_total_carbon_emissions_naive(start: datetime, runtime: timedelta,
                                      max_delay: timedelta,
                                      input_transfer_time: timedelta,
                                      output_transfer_time: timedelta,
@@ -124,7 +128,7 @@ def calculate_total_carbon_emissions(start: datetime, runtime: timedelta,
         # look up in existing carbon emission rates' cumulative carbon emission.
         (x_values, y_values) = carbon_emission_cumsum
         (start_cumsum, end_cumsum) = np.interp([start_timestamp, end_timestamp], x_values, y_values)
-        return end_cumsum - start_cumsum
+        return round(end_cumsum - start_cumsum, FLOAT_PRECISION)
 
     def _calculate_total_emission(curr_wait_times: list[datetime], breakdown=False):
         """Calculate the total carbon emissions based on the current wait times."""
@@ -269,6 +273,307 @@ def calculate_total_carbon_emissions(start: datetime, runtime: timedelta,
     output_transfer_end = output_transfer_start + output_transfer_time
 
     return (_calculate_total_emission(curr_wait_times, True), {
+        'input_transfer_start': input_transfer_start,
+        'input_transfer_duration': input_transfer_time,
+        'input_transfer_end': input_transfer_end,
+        'compute_start': compute_start,
+        'compute_duration': runtime,
+        'compute_end': compute_end,
+        'output_transfer_start': output_transfer_start,
+        'output_transfer_duration': output_transfer_time,
+        'output_transfer_end': output_transfer_end,
+        'min_start': start,
+        'max_end': start + runtime + max_delay,
+        'total_transfer_time': input_transfer_time + output_transfer_time,
+    })
+
+def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
+                                     max_delay: timedelta,
+                                     input_transfer_time: timedelta,
+                                     output_transfer_time: timedelta,
+                                     compute_carbon_emission_rates: pd.Series,
+                                     transfer_carbon_emission_rates: pd.Series,
+                                     ) -> tuple[float, timedelta]:
+    """Calculate the total carbon emission, including both compute and data transfer emissions.
+
+        Args:
+            start: start time of a workload.
+            runtime: runtime of a workload.
+            max_delay: the amount of delay that a workload can tolerate.
+            transfer_input_time: time to transfer input data.
+            transfer_output_time: time to transfer output data.
+            compute_carbon_emission_rates: the compute carbon emission rate in gCO2/s.
+            transfer_carbon_emission_rates: the aggregated data transfer carbon emission rate in gCO2/s.
+
+        Returns:
+            Total carbon emissions in kgCO2.
+            Optimal delay of start time, if applicable.
+    """
+    current_app.logger.info('Calculating total carbon emissions ...')
+    if runtime <= timedelta():
+        raise BadRequest("Runtime must be positive.")
+
+    if input_transfer_time + output_transfer_time > max_delay:
+        raise ValueError("Not enough time to finish before deadline.")
+
+    perf_start_time = time.time()
+
+    # Linear algorithm described in appendix A of the paper.
+
+    def calculate_integral_optimized(D, T_min, T_max, steps) -> dict[int, float]:
+        """Calculate the integral of a step function with a given window [T_min, T_max] and step size D."""
+        if len(steps) == 0:
+            return {}
+
+        last_step_time = T_min
+        last_step_value = 0
+
+        # Add a sentinel value at the end of steps for easy calculation
+        steps_with_sentinel = steps + [(float('inf'), 0)]
+
+        # Pre-calculate the integral up to each step
+        precalc_integral = [0]
+        for step_time, step_value in steps_with_sentinel:
+            precalc_integral.append(precalc_integral[-1] + last_step_value * (step_time - last_step_time))
+            last_step_time = step_time
+            last_step_value = step_value
+
+        # Calculate the integral at each time t using the pre-calculated values
+        integral: dict[int, float] = {}
+        start_index, end_index = 0, 0
+        for t in range(T_min, T_max + 1):
+            # Update start_index and end_index if necessary
+            while steps_with_sentinel[start_index][0] <= t:
+                start_index += 1
+            while steps_with_sentinel[end_index][0] < t + D:
+                end_index += 1
+
+            # Calculate the total using precalculated integrals and adjusting for the partial areas
+            total = precalc_integral[end_index] - precalc_integral[start_index]
+            total -= steps_with_sentinel[start_index - 1][1] * (t - steps_with_sentinel[start_index - 1][0])
+            total += steps_with_sentinel[end_index - 1][1] * ((t + D) - steps_with_sentinel[end_index - 1][0])
+
+            # Need to round to avoid floating point inequality for later comparison.
+            integral[t] = round(total, FLOAT_PRECISION)
+
+        return integral
+
+    # Procedure to get optimal points
+    def get_optimal_points(f_I: dict[int, float], f_steps: list[tuple[int, float]],
+                           D: int, T_min: int, T_max: int, reverse: bool, compare) -> list[int]:
+        """Get a sorted list of optimal points for a given integral function f_I.
+
+            Optimal points are defined as the series of turning points (where the derivative of f_I aka f_steps' value changes) and the values are more optimal (as defined by compare). We do not need to consider other points because they are less optimal (has higher total carbon emissions on the curve).
+        """
+        if len(f_I) == 0:
+            return []
+
+        OP = []
+        last_value = float('inf')
+        interval = range(T_min, T_max + 1) if not reverse else range(T_max, T_min - 1, -1)
+
+        # The time points of the step function
+        f_step_inputs = set(x for x, _ in f_steps)
+
+        def is_tuning_point(t):
+            """Check if the derivative of f_I changes at time t, aka whether the step function's value changes.
+
+                We can further simplify this by only checking whether the start time and end time appears in the step function's inputs.
+            """
+            return t in f_step_inputs or (t + D) in f_step_inputs
+
+        for t in interval:
+            if t != T_min and t != T_max and not is_tuning_point(t):
+                continue
+            current_value = f_I[t]
+            if compare(current_value, last_value):
+                last_value = current_value
+                OP.append(t)
+
+        if reverse:
+            OP.reverse()
+        return OP
+
+    # Main function to optimize total carbon
+    def optimize_total_carbon(f1_steps: list[tuple[int, float]],
+                              f2_steps: list[tuple[int, float]],
+                              f3_steps: list[tuple[int, float]],
+                              T0: int, T4: int, D1: int, D2: int, D3: int):
+        integrals = {}
+        OPs = {}
+        OPs_reverse = {}
+        assert T0 == 0, "T0 should be set to 0."
+
+        perf_start_time = time.time()
+
+        # Calculate integrals and optimal points for each function
+        for i, (f_steps, D) in enumerate(zip([f1_steps, f2_steps, f3_steps], [D1, D2, D3]), start=1):
+            Tmin = T0 + sum([D1, D2, D3][:i-1])
+            Tmax = T4 - sum([D1, D2, D3][i-1:])
+            integral = calculate_integral_optimized(D, Tmin, Tmax, f_steps)
+            integrals[i] = integral
+
+        perf_elapsed = time.time() - perf_start_time
+        current_app.logger.debug('Pre-calculation of integral took %.3f seconds' % perf_elapsed)
+        perf_start_time = time.time()
+
+        for i, (f_steps, D) in enumerate(zip([f1_steps, f2_steps, f3_steps], [D1, D2, D3]), start=1):
+            Tmin = T0 + sum([D1, D2, D3][:i-1])
+            Tmax = T4 - sum([D1, D2, D3][i-1:])
+            if i == 1:
+                # In the non-reverse case (t1), we only consider the first point of equal value (hence strict comparison), because an earlier time with equal value is always available and thus preferred.
+                OPs[i] = get_optimal_points(integrals[i], f_steps, D, Tmin, Tmax, False, lambda x, y: x < y)
+                # This is for faster lookup for the last element in the next step.
+                OPs_reverse[i] = list(reversed(OPs[i]))
+            elif i == 2:
+                # OPs for t2 is used to fast forward t2 in the linear scanning, and thus we consider all points where the integral changes.
+                OPs[i] = get_optimal_points(integrals[i], f_steps, D, Tmin, Tmax, False, lambda x, y: True)
+            elif i == 3:
+                # In the reverse case (t3), we consider all the points of equal value, because a later point with equal value can still be picked.
+                OPs[i] = get_optimal_points(integrals[i], f_steps, D, Tmin, Tmax, True, lambda x, y: x <= y)
+
+        perf_elapsed = time.time() - perf_start_time
+        current_app.logger.debug('Pre-calculation of optimal points took %.3f seconds' % perf_elapsed)
+
+        perf_start_time = time.time()
+
+        min_integral_total = float('inf')
+        T_optimal: list[int] = [np.nan, np.nan, np.nan]
+        min_integrals: list[float] = [np.nan, np.nan, np.nan]
+
+        # Find the optimal time intervals
+        t2 = T0 + D1
+        T1_MIN = T0
+        T1_MAX = T4 - D1 - D2 - D3
+        T2_MAX = T4 - D2 - D3
+        T3_MAX = T4 - D3
+        while t2 <= T2_MAX:
+            # Calculate minimum integral for f1
+            if integrals[1]:
+                t1_max = t2 - D1
+                op1 = next((op for op in OPs_reverse[1] if op <= t1_max), T1_MIN)
+                # Order matters in argmin call below, as we want to pick the earlier time in case of equal values.
+                # In this case, op1 <= t1_max
+                optimal_t1 = min((integrals[1][op1], op1), (integrals[1][t1_max], t1_max), key=lambda x: x[0])[1]
+                min_integral_1 = integrals[1][optimal_t1]
+            else:
+                optimal_t1 = 0
+                min_integral_1 = 0
+
+            # Calculate minimum integral for f3
+            if integrals[3]:
+                t3_min = t2 + D2
+                op3 = next((op for op in OPs[3] if op >= t3_min), T3_MAX)
+                # Order matters in argmin call below, as we want to pick the earlier time in case of equal values.
+                # In this case, t3_min <= op3
+                optimal_t3 = min((integrals[3][t3_min], t3_min), (integrals[3][op3], op3), key=lambda x: x[0])[1]
+                min_integral_3 = integrals[3][optimal_t3]
+            else:
+                optimal_t3 = t2 + D2
+                min_integral_3 = 0
+
+            # Compare total integral
+            integral_total = min_integral_1 + integrals[2][t2] + min_integral_3
+            if integral_total < min_integral_total:
+                min_integral_total = integral_total
+                T_optimal = [optimal_t1, t2, optimal_t3]
+                min_integrals = [min_integral_1, integrals[2][t2], min_integral_3]
+
+            # min step of t2 till the next turning points of the total integral changes,
+            #   which is the minimum step of t1, t2 and t3 (for integral1, integral2 and integral3).
+            if integrals[1]:
+                # Moving t2 might enable new OPs for t1, and the minimal distance is from current t1_max to the next OP.
+                step_t1 = next((op for op in OPs[1] if op > t1_max), T1_MAX) - t1_max
+            else:
+                step_t1 = T4 - T0   # Large enough so it's bigger than step_t2, so this is not considered
+            step_t2 = next((op for op in OPs[2] if op > t2), T2_MAX) - t2
+            if integrals[3]:
+                # Moving t2 might disable the current optimal t3, and the minimal distance is from current t3_min to the next OP.
+                step_t3 = next((op for op in OPs[3] if op > t3_min), T3_MAX) - t3_min
+            else:
+                step_t3 = T4 - T0   # Large enough so it's bigger than step_t2, so this is not considered
+            t2 += max(min(step_t1, step_t2, step_t3), 1) # Make sure step is at least 1
+
+        perf_elapsed = time.time() - perf_start_time
+        current_app.logger.debug('Scanning t2 took %.3f seconds' % perf_elapsed)
+
+        return T_optimal, min_integrals
+
+    def wrapper_optimize_total_carbon(carbon_rates_1: pd.Series, carbon_rates_2: pd.Series, carbon_rates_3: pd.Series,
+                                      T0: datetime, T4: datetime,
+                                      D1: timedelta, D2: timedelta, D3: timedelta) -> \
+                                        tuple[list[datetime], list[float]]:
+        """Wrapper function to convert the parameters to seconds and call the integer-input optimize carbon function.
+
+        Args:
+            carbon_rates_1, carbon_rates_2, carbon_rates_3: carbon emission rates for the three step functions: input transfer, compute, and output transfer.
+            T0_datetime: minimum start time of the entire job.
+            T4_datetime: maximum end time of the entire job.
+            D1, D2, D3: duration of each step: input transfer, compute, and output transfer.
+
+        Returns:
+            A tuple of: 1) a list of optimal start times for each step, and 2) a list of the corresponding carbon emissions.
+        """
+        def datetime_to_seconds(start_time, end_time):
+            """Converts datetime objects to a total number of seconds since the start_time."""
+            return int((end_time - start_time).total_seconds())
+
+        def timedelta_to_seconds(td):
+            """Converts timedelta objects to a total number of seconds."""
+            return int(td.total_seconds())
+
+        # Convert series to steps for our algorithm
+        def convert_series_to_steps(f_series, T0_datetime):
+            """Converts a pandas Series with a datetime index to a list of steps with seconds as time."""
+            steps = [(int((t - T0_datetime).total_seconds()), value) for t, value in f_series.items()]
+            return steps
+
+        # Validate we have enough data points to cover the entire time range [T0, T4]
+        for carbon_rates in [carbon_rates_1, carbon_rates_2, carbon_rates_3]:
+            if carbon_rates.empty:
+                continue
+            if carbon_rates.index[0] > T0:
+                raise ValueError("Not enough data points to cover the entire time range.")
+            if carbon_rates.index[-1] < T4:
+                raise ValueError("Not enough data points to cover the entire time range.")
+
+        # Convert datetime and timedelta to seconds
+        T0s = datetime_to_seconds(T0, T0)
+        T4s = datetime_to_seconds(T0, T4)
+        D1s = timedelta_to_seconds(D1)
+        D2s = timedelta_to_seconds(D2)
+        D3s = timedelta_to_seconds(D3)
+
+        # Convert carbon rates to step functions
+        f1_steps = convert_series_to_steps(carbon_rates_1, T0)
+        f2_steps = convert_series_to_steps(carbon_rates_2, T0)
+        f3_steps = convert_series_to_steps(carbon_rates_3, T0)
+
+        ts, emissions = optimize_total_carbon(f1_steps, f2_steps, f3_steps, T0s, T4s, D1s, D2s, D3s)
+        return [T0 + timedelta(seconds=t) for t in ts], emissions
+
+    start_times, emissions = wrapper_optimize_total_carbon(
+        transfer_carbon_emission_rates,
+        compute_carbon_emission_rates,
+        transfer_carbon_emission_rates,
+        start,
+        start + runtime + max_delay,
+        input_transfer_time,
+        runtime,
+        output_transfer_time
+    )
+
+    perf_elapsed = time.time() - perf_start_time
+    current_app.logger.info('calculate_total_carbon_emissions() took %.3f seconds' % perf_elapsed)
+
+    (input_transfer_start, compute_start, output_transfer_start) = start_times
+    input_transfer_end = input_transfer_start + input_transfer_time
+    compute_end = compute_start + runtime
+    output_transfer_end = output_transfer_start + output_transfer_time
+
+    emission_output = (emissions[1], emissions[0] + emissions[2])
+
+    return (emission_output, {
         'input_transfer_start': input_transfer_start,
         'input_transfer_duration': input_transfer_time,
         'input_transfer_end': input_transfer_end,
