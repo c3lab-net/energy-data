@@ -2,6 +2,8 @@
 
 from enum import Enum
 from dataclasses import dataclass
+import os.path
+from pathlib import Path
 import traceback
 from flask import current_app
 
@@ -10,6 +12,20 @@ from geopy.distance import distance, lonlat
 from shapely.geometry import Point, LineString, MultiLineString
 
 from api.models.common import Coordinate, ISOName
+from api.util import load_yaml_data
+
+
+def get_network_device_energy_intensity_mapping(config_path: os.path) -> dict[str, float]:
+    """Load the carbon intensity per fuel source map from config."""
+    # Load device to power mapping from yaml config
+    yaml_data = load_yaml_data(config_path)
+    energy_intensity_map_name = 'network_device_energy_intensity'
+    assert yaml_data is not None and energy_intensity_map_name in yaml_data, \
+        f'Failed to load {energy_intensity_map_name} from config.'
+    return yaml_data[energy_intensity_map_name]
+
+MAP_DEVICE_ENERGY_INTENSITY_BY_DEVICE_TYPE = get_network_device_energy_intensity_mapping(
+    os.path.join(Path(__file__).parent.absolute(), 'network_device.yaml'))
 
 # Define an Enum for device types
 class NetworkDeviceType(str, Enum):
@@ -36,6 +52,12 @@ class NetworkDevice:
 
     def __str__(self) -> str:
         return f'{self.device_type} at {self.gps} ({self.iso})'
+
+    def get_energy_intensity_w_per_gbps(self) -> float:
+        """Get the energy intensity in W/Gbps for this device."""
+        if self.device_type not in MAP_DEVICE_ENERGY_INTENSITY_BY_DEVICE_TYPE:
+            raise ValueError(f'Unknown energy intensity for device type {self.device_type}')
+        return MAP_DEVICE_ENERGY_INTENSITY_BY_DEVICE_TYPE[self.device_type]
 
 def create_network_devices_along_path(mls: MultiLineString,
                                       network_device_type: NetworkDeviceType,

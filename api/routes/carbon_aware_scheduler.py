@@ -18,7 +18,7 @@ from api.helpers.balancing_authority import get_iso_from_gps
 from api.helpers.carbon_intensity import get_carbon_intensity_list, calculate_total_carbon_emissions_linear, calculate_total_carbon_emissions_naive
 from api.models.cloud_location import CloudLocationManager, CloudRegion, get_route_between_cloud_regions
 from api.models.common import CarbonDataSource, Coordinate, ISOName, get_iso_format_for_carbon_source, identify_iso_format
-from api.models.network_path import NetworkDevice, NetworkDeviceType, create_network_devices
+from api.models.network_device import NetworkDevice, NetworkDeviceType, create_network_devices
 from api.models.optimization_engine import OptimizationEngine, OptimizationFactor
 from api.models.wan_bandwidth import load_wan_bandwidth_model
 from api.models.workload import DEFAULT_DC_PUE, DEFAULT_NETWORK_PUE, DEFAULT_STORAGE_POWER, CarbonAccountingMode, CloudLocation, Workload
@@ -148,12 +148,6 @@ def get_transfer_time(data_size_gb: float, transfer_rate: Rate) -> timedelta:
     # Round to whole seconds for a later algorithm.
     return timedelta(seconds=ceil(transfer_time.total_seconds()))
 
-def get_per_hop_transfer_power_in_watts(route: NetworkDevice, transfer_rate: Rate) -> float:
-    # NOTE: only consider routers for now.
-    CORE_ROUTER_POWER_WATT = 640
-    CORE_ROUTER_CAPACITY_GBPS = 64
-    return transfer_rate / Rate(CORE_ROUTER_CAPACITY_GBPS, RateUnit.Gbps) * CORE_ROUTER_POWER_WATT
-
 @carbon_data_cache.memoize()
 def get_carbon_emission_rates_as_pd_series(iso: ISOName, start: datetime, end: datetime, power_in_watts: float) -> pd.Series:
     l_carbon_intensity = get_preloaded_carbon_data(iso, start, end)
@@ -190,7 +184,7 @@ def get_compute_carbon_emission_rates(iso: ISOName, start: datetime, end: dateti
     return get_carbon_emission_rates_as_pd_series(iso, start, end, host_power_in_watts).copy()
 
 def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: datetime, end: datetime,
-                                       host_transfer_power_in_watts: float, per_hop_power_in_watts: float) -> \
+                                       transfer_rate: Rate, host_transfer_power_in_watts: float) -> \
                                         tuple[pd.Series,pd.Series,pd.Series]:
     if len(route) == 0: # Same region, no transfer needed.
         return [pd.Series(dtype=float),pd.Series(dtype=float),pd.Series(dtype=float)]
@@ -198,13 +192,14 @@ def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: dateti
     ds_network = pd.Series(dtype=float)
     ds_endpoints = pd.Series(dtype=float)
     for i in range(len(route)):
-        hop = route[i].iso
+        iso = route[i].iso
         # Part 1: Network power consumption from all devices
-        ds_hop = get_carbon_emission_rates_as_pd_series(hop, start, end, per_hop_power_in_watts).copy()
+        per_hop_power_in_watts = route[i].get_energy_intensity_w_per_gbps() * transfer_rate.gbps()
+        ds_hop = get_carbon_emission_rates_as_pd_series(iso, start, end, per_hop_power_in_watts).copy()
         ds_network = ds_network.add(ds_hop, fill_value=0)
         # Part 2: End host power consumption, at the locations of the first and last hop.
         if i == 0 or i == len(route) - 1:
-            ds_endpoint = get_carbon_emission_rates_as_pd_series(hop, start, end, host_transfer_power_in_watts).copy()
+            ds_endpoint = get_carbon_emission_rates_as_pd_series(iso, start, end, host_transfer_power_in_watts).copy()
             ds_endpoints = ds_endpoints.add(ds_endpoint, fill_value=0)
     return (ds_network.add(ds_endpoints, fill_value=0), ds_network, ds_endpoints)
 
@@ -244,11 +239,10 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
 
                     compute_carbon_emission_rates = get_compute_carbon_emission_rates(
                         region.iso, start, end, workload.get_power_in_watts() * DEFAULT_DC_PUE)
-                    host_transfer_power = DEFAULT_STORAGE_POWER
                     all_transfer_carbon_emission_rates = get_transfer_carbon_emission_rates(
                         route, start, end,
-                        host_transfer_power * DEFAULT_DC_PUE,
-                        get_per_hop_transfer_power_in_watts(route, transfer_rate) * DEFAULT_NETWORK_PUE)
+                        transfer_rate,
+                        DEFAULT_STORAGE_POWER * DEFAULT_DC_PUE)
                     (transfer_carbon_emission_rates, \
                         transfer_network_carbon_emission_rates, \
                         transfer_endpoint_carbon_emission_rates) = all_transfer_carbon_emission_rates
