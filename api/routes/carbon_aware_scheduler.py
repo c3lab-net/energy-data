@@ -199,7 +199,7 @@ def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: dateti
     for i in range(len(route)):
         iso = route[i].iso
         # Part 1: Network power consumption from all devices
-        per_hop_power_in_watts = route[i].get_energy_intensity_w_per_gbps() * transfer_rate.gbps()
+        per_hop_power_in_watts = route[i].get_energy_intensity_w_per_gbps() * transfer_rate.gbps() * DEFAULT_NETWORK_PUE
         ds_hop = get_carbon_emission_rates(iso, start, end, per_hop_power_in_watts)
         ds_network = ds_network.add(ds_hop, fill_value=0)
         # Part 2: End host power consumption, at the locations of the first and last hop.
