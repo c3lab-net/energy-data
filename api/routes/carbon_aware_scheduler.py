@@ -18,12 +18,12 @@ from api.helpers.balancing_authority import get_iso_from_gps
 from api.helpers.carbon_intensity import get_carbon_intensity_list, calculate_total_carbon_emissions_linear, calculate_total_carbon_emissions_naive
 from api.models.cloud_location import CloudLocationManager, CloudRegion, get_route_between_cloud_regions
 from api.models.common import CarbonDataSource, Coordinate, ISOName, get_iso_format_for_carbon_source, identify_iso_format
-from api.models.network_path import NetworkDevice, create_network_devices
+from api.models.network_path import NetworkDevice, NetworkDeviceType, create_network_devices
 from api.models.optimization_engine import OptimizationEngine, OptimizationFactor
 from api.models.wan_bandwidth import load_wan_bandwidth_model
 from api.models.workload import DEFAULT_DC_PUE, DEFAULT_NETWORK_PUE, DEFAULT_STORAGE_POWER, CarbonAccountingMode, CloudLocation, Workload
 from api.models.dataclass_extensions import *
-from api.util import Rate, RateUnit, Size, SizeUnit, round_up
+from api.util import Rate, RateUnit, Size, SizeUnit, round_up, carbon_data_cache
 
 g_cloud_manager = CloudLocationManager()
 OPTIMIZATION_FACTORS_AND_WEIGHTS = [
@@ -68,7 +68,7 @@ def init_lookup_iso(_carbon_data_source: CarbonDataSource):
     global carbon_data_source
     carbon_data_source = _carbon_data_source
 
-def task_lookup_iso(region: CloudRegion) -> tuple:
+def task_lookup_iso(region: CloudRegion|NetworkDevice) -> tuple:
     global carbon_data_source
     iso_format = get_iso_format_for_carbon_source(carbon_data_source)
     if region.iso and iso_format == identify_iso_format(region.iso):
@@ -121,7 +121,7 @@ def init_parallel_process_candidate(_workload: Workload,
                                     _carbon_data_source: CarbonDataSource,
                                     _use_prediction: bool,
                                     _carbon_data_store: dict,
-                                    _d_candidate_routes: dict[str, list[CloudRegion]]):
+                                    _d_candidate_routes: dict[str, list[NetworkDevice]]):
     global workload, carbon_data_source, use_prediction, carbon_data_store, d_candidate_routes
     workload = _workload
     carbon_data_source = _carbon_data_source
@@ -137,7 +137,7 @@ def get_preloaded_carbon_data(iso: str, start: datetime, end: datetime) -> list[
     else:
         raise ValueError(f'No carbon data found for iso {iso} in time range ({start}, {end})')
 
-def get_transfer_rate(route: list[CloudRegion], start: datetime, end: datetime, max_delay: timedelta) -> Rate:
+def get_transfer_rate(route: list[NetworkDevice], start: datetime, end: datetime, max_delay: timedelta) -> Rate:
     # TODO: update this to consider route
     # return g_wan_bandwidth.available_bandwidth_at(timestamp=start.time())
     return Rate(125, RateUnit.Mbps)
@@ -148,12 +148,13 @@ def get_transfer_time(data_size_gb: float, transfer_rate: Rate) -> timedelta:
     # Round to whole seconds for a later algorithm.
     return timedelta(seconds=ceil(transfer_time.total_seconds()))
 
-def get_per_hop_transfer_power_in_watts(route: CloudRegion, transfer_rate: Rate) -> float:
+def get_per_hop_transfer_power_in_watts(route: NetworkDevice, transfer_rate: Rate) -> float:
     # NOTE: only consider routers for now.
     CORE_ROUTER_POWER_WATT = 640
     CORE_ROUTER_CAPACITY_GBPS = 64
     return transfer_rate / Rate(CORE_ROUTER_CAPACITY_GBPS, RateUnit.Gbps) * CORE_ROUTER_POWER_WATT
 
+@carbon_data_cache.memoize()
 def get_carbon_emission_rates_as_pd_series(iso: ISOName, start: datetime, end: datetime, power_in_watts: float) -> pd.Series:
     l_carbon_intensity = get_preloaded_carbon_data(iso, start, end)
     df = pd.DataFrame(l_carbon_intensity)
@@ -186,12 +187,9 @@ def get_carbon_emission_rates_as_pd_series(iso: ISOName, start: datetime, end: d
     return ds
 
 def get_compute_carbon_emission_rates(iso: ISOName, start: datetime, end: datetime, host_power_in_watts: float) -> pd.Series:
-    return get_carbon_emission_rates_as_pd_series(iso, start, end, host_power_in_watts)
+    return get_carbon_emission_rates_as_pd_series(iso, start, end, host_power_in_watts).copy()
 
-# TODO: change route entry to special type that contains network device type and not necessarily constraint to region.
-#       We only need to share gps across these two types.
-
-def get_transfer_carbon_emission_rates(route: list[CloudRegion], start: datetime, end: datetime,
+def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: datetime, end: datetime,
                                        host_transfer_power_in_watts: float, per_hop_power_in_watts: float) -> \
                                         tuple[pd.Series,pd.Series,pd.Series]:
     if len(route) == 0: # Same region, no transfer needed.
@@ -201,15 +199,12 @@ def get_transfer_carbon_emission_rates(route: list[CloudRegion], start: datetime
     ds_endpoints = pd.Series(dtype=float)
     for i in range(len(route)):
         hop = route[i].iso
-        # Part 1: Network power consumption
-        #   Part 1.1: Network routers
-        ds_hop = get_carbon_emission_rates_as_pd_series(hop, start, end, per_hop_power_in_watts)
+        # Part 1: Network power consumption from all devices
+        ds_hop = get_carbon_emission_rates_as_pd_series(hop, start, end, per_hop_power_in_watts).copy()
         ds_network = ds_network.add(ds_hop, fill_value=0)
-        #   Part 1.2: Auxiliary devices
-        raise NotImplementedError('TODO')
-        # Part 2: End host power consumption, or first and last hop.
+        # Part 2: End host power consumption, at the locations of the first and last hop.
         if i == 0 or i == len(route) - 1:
-            ds_endpoint = get_carbon_emission_rates_as_pd_series(hop, start, end, host_transfer_power_in_watts)
+            ds_endpoint = get_carbon_emission_rates_as_pd_series(hop, start, end, host_transfer_power_in_watts).copy()
             ds_endpoints = ds_endpoints.add(ds_endpoint, fill_value=0)
     return (ds_network.add(ds_endpoints, fill_value=0), ds_network, ds_endpoints)
 
@@ -276,21 +271,22 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
                     d_scores[OptimizationFactor.CarbonEmissionFromCompute] = compute_carbon_emissions
                     d_scores[OptimizationFactor.CarbonEmissionFromMigration] = transfer_carbon_emission
                     d_misc['timings'].append(timings)
-                    d_misc['route'] = [f'{hop.name} {hop.gps}' for hop in route]
-                    d_misc['route.hop_count'] = len(route)
+                    d_misc['route'] = [str(dev) for dev in route]
+                    is_router = lambda d: d.device_type == NetworkDeviceType.ROUTER
+                    d_misc['route.hop_count'] = sum(1 for dev in route if is_router(dev))
                     d_misc['emission_rates']['compute'] = dump_emission_rates(compute_carbon_emission_rates)
                     d_misc['emission_rates']['transfer'] = dump_emission_rates(transfer_carbon_emission_rates)
                     d_misc['emission_rates']['transfer.network'] = dump_emission_rates(transfer_network_carbon_emission_rates)
                     d_misc['emission_rates']['transfer.endpoint'] = dump_emission_rates(transfer_endpoint_carbon_emission_rates)
-                    total_transfer_time = transfer_input_time + transfer_output_time
-                    d_misc['emission_integral']['compute'] = dump_emission_rates(
-                        compute_carbon_emission_rates * runtime.total_seconds())
-                    d_misc['emission_integral']['transfer'] = dump_emission_rates(
-                        transfer_carbon_emission_rates * total_transfer_time.total_seconds())
-                    d_misc['emission_integral']['transfer.network'] = dump_emission_rates(
-                        transfer_network_carbon_emission_rates * total_transfer_time.total_seconds())
-                    d_misc['emission_integral']['transfer.endpoint'] = dump_emission_rates(
-                        transfer_endpoint_carbon_emission_rates * total_transfer_time.total_seconds())
+                    # total_transfer_time = transfer_input_time + transfer_output_time
+                    # d_misc['emission_integral']['compute'] = dump_emission_rates(
+                    #     compute_carbon_emission_rates * runtime.total_seconds())
+                    # d_misc['emission_integral']['transfer'] = dump_emission_rates(
+                    #     transfer_carbon_emission_rates * total_transfer_time.total_seconds())
+                    # d_misc['emission_integral']['transfer.network'] = dump_emission_rates(
+                    #     transfer_network_carbon_emission_rates * total_transfer_time.total_seconds())
+                    # d_misc['emission_integral']['transfer.endpoint'] = dump_emission_rates(
+                    #     transfer_endpoint_carbon_emission_rates * total_transfer_time.total_seconds())
                     score += (compute_carbon_emissions + transfer_carbon_emission)
             case OptimizationFactor.WanNetworkUsage:
                 # score = input + output data size (GB)
@@ -315,20 +311,25 @@ def task_process_candidate(region: CloudRegion) -> tuple:
 
 def get_routes_by_region(original_location: str,
                          d_candidate_regions: dict[str, CloudRegion],
-                         carbon_accounting_mode: CarbonAccountingMode) -> dict[str, list[CloudRegion]]:
-    d_region_route: dict[str, list[CloudRegion]] = {}
+                         carbon_accounting_mode: CarbonAccountingMode) -> dict[str, list[NetworkDevice]]:
+    d_region_route: dict[str, list[NetworkDevice]] = {}
     for candidate_region in d_candidate_regions:
         match carbon_accounting_mode:
             case CarbonAccountingMode.ComputeAndNetwork:
-                route_info = get_route_between_cloud_regions(original_location, candidate_region)
-                d_region_route[candidate_region] = create_network_devices(*route_info)
+                try:
+                    route_info = get_route_between_cloud_regions(original_location, candidate_region)
+                    d_region_route[candidate_region] = create_network_devices(*route_info)
+                except Exception as ex:
+                    current_app.logger.error(f'Failed to get route between {original_location} and {candidate_region}: {ex}')
+                    current_app.logger.error(traceback.format_exc())
+                    d_region_route[candidate_region] = None
             case CarbonAccountingMode.ComputeOnly:
                 d_region_route[candidate_region] = []
             case _:
                 raise NotImplementedError('Unknown carbon_accounting_mode')
     return d_region_route
 
-def assign_iso_to_route_hops(d_candidate_routes: dict[str, list[CloudRegion]],
+def assign_iso_to_route_hops(d_candidate_routes: dict[str, list[NetworkDevice]],
                              d_transit_hop_iso: dict[Coordinate, ISOName]) -> None:
     """Assign ISO to transit hops in the route."""
     for candidate in d_candidate_routes:
@@ -361,7 +362,7 @@ class CarbonAwareScheduler(Resource):
         d_candidate_routes = get_routes_by_region(args.original_location, d_candidate_regions,
                                                   args.carbon_accounting_mode)
         candidate_regions = list(d_candidate_regions.values())
-        transfer_hop_regions = list(set(hop for route in d_candidate_routes.values() if route for hop in route))
+        transfer_hops = list(set(hop for route in d_candidate_routes.values() if route for hop in route))
 
         d_region_isos = dict()
         d_region_scores = dict()
@@ -369,7 +370,7 @@ class CarbonAwareScheduler(Resource):
         d_misc_details = dict()
         d_transit_hop_iso = dict()
 
-        all_regions = candidate_regions + transfer_hop_regions
+        all_regions = candidate_regions + transfer_hops
         with Pool(1 if __debug__ else 4,
                   initializer=init_lookup_iso,
                   initargs=(args.carbon_data_source,)) as pool:
