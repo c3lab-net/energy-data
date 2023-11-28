@@ -2,7 +2,7 @@
 
 import argparse
 from flask import current_app
-import requests
+import requests_cache
 
 from api.util import simple_cache, exponential_backoff
 
@@ -12,15 +12,16 @@ else:
     from util import get_auth_token
 
 
+session = requests_cache.CachedSession('emap_cache', backend='filesystem')
+
 # Get the balancing authority based on GPS location
 @exponential_backoff(should_retry=lambda ex: ex.response.status_code == 429)
-@simple_cache.memoize(timeout=0)
 def get_emap_ba_from_loc(latitude: float, longitude: float):
     current_app.logger.debug(f'get_emap_ba_from_loc({latitude}, {longitude})')
     region_url = 'https://api-access.electricitymaps.com/free-tier/home-assistant'
     headers = { "auth-token": get_auth_token() }
     params = {'lat': latitude, 'lon': longitude}
-    response = requests.get(region_url, headers=headers, params=params)
+    response = session.get(region_url, headers=headers, params=params)
     response.raise_for_status()
     return response
 
