@@ -187,6 +187,9 @@ def get_carbon_emission_rates_as_pd_series(iso: ISOName, start: datetime, end: d
 def get_compute_carbon_emission_rates(iso: ISOName, start: datetime, end: datetime, host_power_in_watts: float) -> pd.Series:
     return get_carbon_emission_rates_as_pd_series(iso, start, end, host_power_in_watts)
 
+# TODO: change route entry to special type that contains network device type and not necessarily constraint to region.
+#       We only need to share gps across these two types.
+
 def get_transfer_carbon_emission_rates(route: list[CloudRegion], start: datetime, end: datetime,
                                        host_transfer_power_in_watts: float, per_hop_power_in_watts: float) -> \
                                         tuple[pd.Series,pd.Series,pd.Series]:
@@ -198,8 +201,11 @@ def get_transfer_carbon_emission_rates(route: list[CloudRegion], start: datetime
     for i in range(len(route)):
         hop = route[i].iso
         # Part 1: Network power consumption
+        #   Part 1.1: Network routers
         ds_hop = get_carbon_emission_rates_as_pd_series(hop, start, end, per_hop_power_in_watts)
         ds_network = ds_network.add(ds_hop, fill_value=0)
+        #   Part 1.2: Auxiliary devices
+        raise NotImplementedError('TODO')
         # Part 2: End host power consumption, or first and last hop.
         if i == 0 or i == len(route) - 1:
             ds_endpoint = get_carbon_emission_rates_as_pd_series(hop, start, end, host_transfer_power_in_watts)

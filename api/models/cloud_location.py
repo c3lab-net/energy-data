@@ -8,7 +8,8 @@ from flask import current_app
 from werkzeug.exceptions import NotFound
 
 from api.models.common import Coordinate
-from api.util import get_psql_connection, load_yaml_data, psql_execute_scalar
+from api.models.network_path import create_network_devices
+from api.util import get_psql_connection, load_yaml_data, psql_execute_list, psql_execute_scalar
 
 @dataclass(unsafe_hash=True)
 class CloudRegion:
@@ -106,19 +107,24 @@ def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str
     (dst_cloud, dst_region) = dst_cloud_region.lower().split(':', 1)
     with get_psql_connection() as conn:
         cursor = conn.cursor()
-        routers_latlon: list[tuple[str]] = psql_execute_scalar(
+        records: str = psql_execute_list(
             cursor,
-            """SELECT routers_latlon FROM cloud_region_best_route
+            """SELECT routers_latlon, wkt_path FROM cloud_region_best_route
                 WHERE src_cloud = %s AND src_region = %s
                     AND dst_cloud = %s AND dst_region = %s
                     LIMIT 1;""",
             [src_cloud, src_region, dst_cloud, dst_region])
-    if not routers_latlon:
+    if len(records) < 1:
         current_app.logger.error(f'No route found between {src_cloud_region} and {dst_cloud_region}')
         return None
+    (routers_latlon, wkt_path) = records[0]
 
     route_in_coordinates = [ast.literal_eval(t) for t in routers_latlon.split('|')]
     current_app.logger.debug('route: %s' % route_in_coordinates)
+
+    network_devices = create_network_devices(route_in_coordinates, wkt_path)
+    print(network_devices)
+    # TODO: convert network_devices to CloudRegion, or change the return type of this function and callers
 
     route: list[CloudRegion] = []
     for i in range(len(route_in_coordinates)):
