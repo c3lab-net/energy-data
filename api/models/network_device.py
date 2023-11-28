@@ -57,7 +57,13 @@ class NetworkDevice:
         """Get the energy intensity in W/Gbps for this device."""
         if self.device_type not in MAP_DEVICE_ENERGY_INTENSITY_BY_DEVICE_TYPE:
             raise ValueError(f'Unknown energy intensity for device type {self.device_type}')
-        return MAP_DEVICE_ENERGY_INTENSITY_BY_DEVICE_TYPE[self.device_type]
+        energy_intensity = MAP_DEVICE_ENERGY_INTENSITY_BY_DEVICE_TYPE[self.device_type]
+
+        # Account for power loss for non-zero distance from power source
+        TRANSMISSION_LOSS_PER_100KM = 0.035     # From "HVDC Submarine Power Cables in the World"
+        # Exponential decay, per 100km the device receives 3.5% less power
+        power_ratio_received = pow(1 - TRANSMISSION_LOSS_PER_100KM, self.power_source_distance_km / 100.0)
+        return energy_intensity / power_ratio_received
 
 def create_network_devices_along_path(mls: MultiLineString,
                                       network_device_type: NetworkDeviceType,
