@@ -8,8 +8,7 @@ from flask import current_app
 from werkzeug.exceptions import NotFound
 
 from api.models.common import Coordinate
-from api.models.network_path import create_network_devices
-from api.util import get_psql_connection, load_yaml_data, psql_execute_list, psql_execute_scalar
+from api.util import get_psql_connection, load_yaml_data, psql_execute_list
 
 @dataclass(unsafe_hash=True)
 class CloudRegion:
@@ -95,10 +94,18 @@ class CloudLocationManager:
                 return region
         raise NotFound('Unknown region "%s" for provider "%s".' % (region_code, cloud_provider))
 
-def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str) -> list[CloudRegion]:
-    """Get the list of intermediate hops between two cloud regions."""
+def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str) -> \
+        tuple[list[Coordinate], str, list[str]]:
+    """Get the route between two cloud regions.
+
+    This includes the router hop coordinates, the fiber paths in multilinestring, and the fiber types of each linestring.
+
+    Args:
+        src_cloud_region: The source cloud region in the format of "provider:code".
+        dst_cloud_region: The destination cloud region in the format of "provider:code".
+    """
     if src_cloud_region == dst_cloud_region:
-        return []
+        return [], '', []
 
     current_app.logger.debug('get_route_between_cloud_regions(%s, %s)' % (src_cloud_region, dst_cloud_region))
 
@@ -114,23 +121,14 @@ def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str
                     AND dst_cloud = %s AND dst_region = %s
                     LIMIT 1;""",
             [src_cloud, src_region, dst_cloud, dst_region])
+
     if len(records) < 1:
         current_app.logger.error(f'No route found between {src_cloud_region} and {dst_cloud_region}')
         return None
-    [routers_latlon_str, fiber_wkt_paths, fiber_types_str]: list[str] = records[0]
+
+    (routers_latlon_str, fiber_wkt_paths, fiber_types_str) = records[0]
 
     routers_latlon: list[Coordinate] = [ast.literal_eval(t) for t in routers_latlon_str.split('|')]
     fiber_types: list[str] = fiber_types_str.split('|')
 
-    network_devices = create_network_devices(routers_latlon, fiber_wkt_paths, fiber_types)
-    print(network_devices)
-    # TODO: convert network_devices to CloudRegion, or change the return type of this function and callers
-
-    route: list[CloudRegion] = []
-    for i in range(len(routers_latlon)):
-        coordinate = routers_latlon[i]
-        provider = f'{src_cloud_region}->{dst_cloud_region}'
-        cloud_region = CloudRegion(provider, f'hop{i}', f'Hop {i} of {provider}', None, coordinate)
-        route.append(cloud_region)
-
-    return route
+    return routers_latlon, fiber_wkt_paths, fiber_types

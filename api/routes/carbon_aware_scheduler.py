@@ -17,7 +17,8 @@ from api.helpers.balancing_authority import get_iso_from_gps
 
 from api.helpers.carbon_intensity import get_carbon_intensity_list, calculate_total_carbon_emissions_linear, calculate_total_carbon_emissions_naive
 from api.models.cloud_location import CloudLocationManager, CloudRegion, get_route_between_cloud_regions
-from api.models.common import CarbonDataSource, Coordinate, ISOName, RouteInISO, get_iso_format_for_carbon_source, identify_iso_format
+from api.models.common import CarbonDataSource, Coordinate, ISOName, get_iso_format_for_carbon_source, identify_iso_format
+from api.models.network_path import NetworkDevice, create_network_devices
 from api.models.optimization_engine import OptimizationEngine, OptimizationFactor
 from api.models.wan_bandwidth import load_wan_bandwidth_model
 from api.models.workload import DEFAULT_DC_PUE, DEFAULT_NETWORK_PUE, DEFAULT_STORAGE_POWER, CarbonAccountingMode, CloudLocation, Workload
@@ -319,7 +320,8 @@ def get_routes_by_region(original_location: str,
     for candidate_region in d_candidate_regions:
         match carbon_accounting_mode:
             case CarbonAccountingMode.ComputeAndNetwork:
-                d_region_route[candidate_region] = get_route_between_cloud_regions(original_location, candidate_region)
+                route_info = get_route_between_cloud_regions(original_location, candidate_region)
+                d_region_route[candidate_region] = create_network_devices(*route_info)
             case CarbonAccountingMode.ComputeOnly:
                 d_region_route[candidate_region] = []
             case _:
