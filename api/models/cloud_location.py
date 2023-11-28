@@ -109,7 +109,7 @@ def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str
         cursor = conn.cursor()
         records: str = psql_execute_list(
             cursor,
-            """SELECT routers_latlon, wkt_path FROM cloud_region_best_route
+            """SELECT routers_latlon, fiber_wkt_paths, fiber_types FROM cloud_region_best_route
                 WHERE src_cloud = %s AND src_region = %s
                     AND dst_cloud = %s AND dst_region = %s
                     LIMIT 1;""",
@@ -117,18 +117,18 @@ def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str
     if len(records) < 1:
         current_app.logger.error(f'No route found between {src_cloud_region} and {dst_cloud_region}')
         return None
-    (routers_latlon, wkt_path) = records[0]
+    [routers_latlon_str, fiber_wkt_paths, fiber_types_str]: list[str] = records[0]
 
-    route_in_coordinates = [ast.literal_eval(t) for t in routers_latlon.split('|')]
-    current_app.logger.debug('route: %s' % route_in_coordinates)
+    routers_latlon: list[Coordinate] = [ast.literal_eval(t) for t in routers_latlon_str.split('|')]
+    fiber_types: list[str] = fiber_types_str.split('|')
 
-    network_devices = create_network_devices(route_in_coordinates, wkt_path)
+    network_devices = create_network_devices(routers_latlon, fiber_wkt_paths, fiber_types)
     print(network_devices)
     # TODO: convert network_devices to CloudRegion, or change the return type of this function and callers
 
     route: list[CloudRegion] = []
-    for i in range(len(route_in_coordinates)):
-        coordinate = route_in_coordinates[i]
+    for i in range(len(routers_latlon)):
+        coordinate = routers_latlon[i]
         provider = f'{src_cloud_region}->{dst_cloud_region}'
         cloud_region = CloudRegion(provider, f'hop{i}', f'Hop {i} of {provider}', None, coordinate)
         route.append(cloud_region)

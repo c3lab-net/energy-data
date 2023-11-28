@@ -24,7 +24,8 @@ AS
             t1.hop_count,
             t1.distance_km,
             t1.routers_latlon,
-            t1.wkt_path,
+            t1.fiber_wkt_paths,
+            t1.fiber_types,
             ROW_NUMBER() OVER (PARTITION BY
                                     t1.src_cloud,
                                     t1.src_region,
@@ -50,7 +51,8 @@ AS
         f.hop_count,
         f.distance_km,
         f.routers_latlon,
-        f.wkt_path
+        f.fiber_wkt_paths,
+        f.fiber_types
     FROM
         Filtered f
     WHERE f.rn = 1
