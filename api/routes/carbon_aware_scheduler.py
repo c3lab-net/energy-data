@@ -99,14 +99,15 @@ def preload_carbon_data(workload: Workload,
     running_intervals = workload.get_running_intervals_in_24h()
     for (start, end) in running_intervals:
         max_delay = workload.schedule.max_delay
-        carbon_data = get_carbon_intensity_list(iso, start, end + max_delay,
+        l_carbon_intensity = get_carbon_intensity_list(iso, start, end + max_delay,
                                                         carbon_data_source, use_prediction,
                                                         desired_renewable_ratio)
-        assert len(carbon_data) > 0 and \
-            min([d['timestamp'] for d in carbon_data]) <= start and \
-            max([d['timestamp'] for d in carbon_data]) >= end + max_delay, \
+        assert len(l_carbon_intensity) > 0 and \
+            min([d['timestamp'] for d in l_carbon_intensity]) <= start and \
+            max([d['timestamp'] for d in l_carbon_intensity]) >= end + max_delay, \
                 f'Not enough carbon data for {iso} to cover time range [{start}, {end}]'
-        carbon_data_store[(iso, start, end)] = carbon_data
+        carbon_data_store[(iso, start, end)] = \
+            convert_carbon_intensity_to_pd_series(iso, l_carbon_intensity, start, end + max_delay)
     return carbon_data_store
 
 def task_preload_carbon_data(iso: str) -> tuple:
@@ -129,7 +130,7 @@ def init_parallel_process_candidate(_workload: Workload,
     carbon_data_store = _carbon_data_store
     d_candidate_routes = _d_candidate_routes
 
-def get_preloaded_carbon_data(iso: str, start: datetime, end: datetime) -> list[dict]:
+def get_preloaded_carbon_data(iso: str, start: datetime, end: datetime) -> pd.Series:
     global carbon_data_store
     key = (iso, start, end)
     if key in carbon_data_store:
@@ -148,9 +149,8 @@ def get_transfer_time(data_size_gb: float, transfer_rate: Rate) -> timedelta:
     # Round to whole seconds for a later algorithm.
     return timedelta(seconds=ceil(transfer_time.total_seconds()))
 
-@carbon_data_cache.memoize()
-def get_carbon_emission_rates_as_pd_series(iso: ISOName, start: datetime, end: datetime, power_in_watts: float) -> pd.Series:
-    l_carbon_intensity = get_preloaded_carbon_data(iso, start, end)
+def convert_carbon_intensity_to_pd_series(iso: ISOName, l_carbon_intensity: list[dict],
+                                          start: datetime, end: datetime) -> pd.Series:
     df = pd.DataFrame(l_carbon_intensity)
     # Force conversion using UTC is needed to handle multiple timezones
     df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
@@ -160,9 +160,6 @@ def get_carbon_emission_rates_as_pd_series(iso: ISOName, start: datetime, end: d
     # Only consider hourly data, using average carbon intensity.
     df = df.resample('H').mean()
     ds = df['carbon_intensity']
-    # Conversion: gCO2/kWh * W * 1/(1000*3600) kh/s = gCO2/s
-    ds = ds * power_in_watts / (1000 * 3600)
-    ds.sort_index(inplace=True)
 
     # Insert end-of-time index with zero value to avoid out-of-bound read corner case handling
     if len(ds.index) < 2:
@@ -180,8 +177,16 @@ def get_carbon_emission_rates_as_pd_series(iso: ISOName, start: datetime, end: d
 
     return ds
 
-def get_compute_carbon_emission_rates(iso: ISOName, start: datetime, end: datetime, host_power_in_watts: float) -> pd.Series:
-    return get_carbon_emission_rates_as_pd_series(iso, start, end, host_power_in_watts).copy()
+def calculate_carbon_emission_rates(carbon_intensity: pd.Series, power_in_watts: float):
+    """Calculate carbon emission rate in gCO2/s."""
+    # Conversion: gCO2/kWh * W * 1/(1000*3600) kh/s = gCO2/s
+    carbon_emission_rate = carbon_intensity * power_in_watts / (1000 * 3600)
+    carbon_emission_rate.sort_index(inplace=True)
+    return carbon_emission_rate
+
+def get_carbon_emission_rates(iso: ISOName, start: datetime, end: datetime, power_in_watts: float) -> pd.Series:
+    carbon_intensity = get_preloaded_carbon_data(iso, start, end)
+    return calculate_carbon_emission_rates(carbon_intensity, power_in_watts)
 
 def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: datetime, end: datetime,
                                        transfer_rate: Rate, host_transfer_power_in_watts: float) -> \
@@ -195,11 +200,11 @@ def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: dateti
         iso = route[i].iso
         # Part 1: Network power consumption from all devices
         per_hop_power_in_watts = route[i].get_energy_intensity_w_per_gbps() * transfer_rate.gbps()
-        ds_hop = get_carbon_emission_rates_as_pd_series(iso, start, end, per_hop_power_in_watts).copy()
+        ds_hop = get_carbon_emission_rates(iso, start, end, per_hop_power_in_watts)
         ds_network = ds_network.add(ds_hop, fill_value=0)
         # Part 2: End host power consumption, at the locations of the first and last hop.
         if i == 0 or i == len(route) - 1:
-            ds_endpoint = get_carbon_emission_rates_as_pd_series(iso, start, end, host_transfer_power_in_watts).copy()
+            ds_endpoint = get_carbon_emission_rates(iso, start, end, host_transfer_power_in_watts)
             ds_endpoints = ds_endpoints.add(ds_endpoint, fill_value=0)
     return (ds_network.add(ds_endpoints, fill_value=0), ds_network, ds_endpoints)
 
@@ -237,7 +242,7 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
                     transfer_input_time = get_transfer_time(workload.dataset.input_size_gb, transfer_rate) if route else timedelta()
                     transfer_output_time = get_transfer_time(workload.dataset.output_size_gb, transfer_rate) if route else timedelta()
 
-                    compute_carbon_emission_rates = get_compute_carbon_emission_rates(
+                    compute_carbon_emission_rates = get_carbon_emission_rates(
                         region.iso, start, end, workload.get_power_in_watts() * DEFAULT_DC_PUE)
                     all_transfer_carbon_emission_rates = get_transfer_carbon_emission_rates(
                         route, start, end,
