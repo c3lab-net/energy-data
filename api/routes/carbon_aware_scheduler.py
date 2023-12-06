@@ -141,7 +141,7 @@ def get_preloaded_carbon_data(iso: str, start: datetime, end: datetime) -> pd.Se
 def get_transfer_rate(route: list[NetworkDevice], start: datetime, end: datetime, max_delay: timedelta) -> Rate:
     # TODO: update this to consider route
     # return g_wan_bandwidth.available_bandwidth_at(timestamp=start.time())
-    return Rate(125, RateUnit.Mbps)
+    return Rate(1024, RateUnit.Mbps)
 
 def get_transfer_time(data_size_gb: float, transfer_rate: Rate) -> timedelta:
     data_size = Size(data_size_gb, SizeUnit.GB)
