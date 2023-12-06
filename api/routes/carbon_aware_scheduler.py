@@ -21,7 +21,7 @@ from api.models.common import CarbonDataSource, Coordinate, ISOName, get_iso_for
 from api.models.network_device import NetworkDevice, NetworkDeviceType, create_network_devices
 from api.models.optimization_engine import OptimizationEngine, OptimizationFactor
 from api.models.wan_bandwidth import load_wan_bandwidth_model
-from api.models.workload import DEFAULT_DC_PUE, DEFAULT_NETWORK_PUE, DEFAULT_STORAGE_POWER, CarbonAccountingMode, CloudLocation, Workload
+from api.models.workload import DEFAULT_DC_PUE, DEFAULT_NETWORK_PUE, DEFAULT_NETWORK_REDUNDANCY, DEFAULT_STORAGE_POWER, CarbonAccountingMode, CloudLocation, Workload
 from api.models.dataclass_extensions import *
 from api.util import Rate, RateUnit, Size, SizeUnit, round_up, carbon_data_cache
 
@@ -199,7 +199,8 @@ def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: dateti
     for i in range(len(route)):
         iso = route[i].iso
         # Part 1: Network power consumption from all devices
-        per_hop_power_in_watts = route[i].get_energy_intensity_w_per_gbps() * transfer_rate.gbps() * DEFAULT_NETWORK_PUE
+        per_hop_power_in_watts = route[i].get_energy_intensity_w_per_gbps() * transfer_rate.gbps() * \
+            DEFAULT_NETWORK_PUE * DEFAULT_NETWORK_REDUNDANCY
         ds_hop = get_carbon_emission_rates(iso, start, end, per_hop_power_in_watts)
         ds_network = ds_network.add(ds_hop, fill_value=0)
         # Part 2: End host power consumption, at the locations of the first and last hop.
