@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 
-import os
-import requests
+import argparse
 import configparser
-from typing import Callable
-import psycopg2
-import psycopg2.extras
-from crawl import get_db_connection
-import datetime
+import logging
+import os
 import random
-from time import sleep
 import sys
 import traceback
-import logging
+from time import sleep
+from typing import Callable
+
+import requests
+from crawl import get_db_connection
 
 CONFIG_FILE = "electricitymap.ini"
 
@@ -145,12 +144,31 @@ def get_all_electricity_zones():
     return zone_response_json.keys()
 
 
-if __name__ == '__main__':
-    init_logging(level=logging.INFO)
-
+def crawl():
     session = requests.Session()
     conn = get_db_connection()
 
     for zone in get_all_electricity_zones():
         fetch_and_update(zone, session, conn)
     conn.close()
+
+
+def backfill(zones):
+    logging.info(f"Backfilling {zones} ...")
+    raise NotImplementedError()
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Crawl electricity map API and update database.')
+    parser.add_argument('-B', '--backfill', action='store_true', help='Run backfill')
+    return parser.parse_args()
+
+
+if __name__ == '__main__':
+    init_logging(level=logging.INFO)
+
+    args = parse_args()
+    if args.backfill:
+        backfill()
+    else:
+        crawl()
