@@ -115,18 +115,19 @@ MAP_OVERRIDE_FETCHFNS = {
 }
 OVERRIDE_DATA_SOURCES = MAP_OVERRIDE_FETCHFNS.keys()
 
-parser = argparse.ArgumentParser()
-parser.add_argument('-B', '--backfill', action='store_true', help='Run backfill')
-parser.add_argument('-D', '--days-for-backfill', type=int, help='Number of days to run backfill for')
-parser.add_argument('--backfill-begin-date', type=lambda s: datetime.strptime(s, '%Y-%m-%d'),
-                    help='The begin date for backfill')
-parser.add_argument('--backfill-end-date', type=lambda s: datetime.strptime(s, '%Y-%m-%d'),
-                    help='The end date for backfill')
-parser.add_argument('-R', '--regions', nargs='+', choices=map_regions.keys(), help='Select a subset of regions')
-parser.add_argument('-N', '--dry-run', action='store_true', help='Only pull data but do not write to database')
-parser.add_argument('-F', '--force', action='store_true', help='Force pulling new data and ignore last updated')
-parser.add_argument('--override-data-source', choices=OVERRIDE_DATA_SOURCES, help='Override the crawler data source')
-args = parser.parse_args()
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-B', '--backfill', action='store_true', help='Run backfill')
+    parser.add_argument('-D', '--days-for-backfill', type=int, help='Number of days to run backfill for')
+    parser.add_argument('--backfill-begin-date', type=lambda s: datetime.strptime(s, '%Y-%m-%d'),
+                        help='The begin date for backfill')
+    parser.add_argument('--backfill-end-date', type=lambda s: datetime.strptime(s, '%Y-%m-%d'),
+                        help='The end date for backfill')
+    parser.add_argument('-R', '--regions', nargs='+', choices=map_regions.keys(), help='Select a subset of regions')
+    parser.add_argument('-N', '--dry-run', action='store_true', help='Only pull data but do not write to database')
+    parser.add_argument('-F', '--force', action='store_true', help='Force pulling new data and ignore last updated')
+    parser.add_argument('--override-data-source', choices=OVERRIDE_DATA_SOURCES, help='Override the crawler data source')
+    return parser.parse_args()
 
 
 def get_db_connection(host='/var/run/postgresql/', database="electricity-data"):
@@ -168,7 +169,7 @@ def is_in_scheduled_downtime(region: str, e: Exception):
     return False
 
 
-def fetch_new_data(region, target_datetime: datetime = None):
+def fetch_new_data(region, args: argparse.Namespace, target_datetime: datetime = None):
     fetch_fn = map_regions[region]['fetchFn']
     l_result = []
     if not args.backfill and map_regions[region]['fetchCurrentData']:
@@ -239,23 +240,23 @@ def upload_new_data(conn, region, timestamp, d_power_mw_by_category):
     return (count_insert, count_update)
 
 
-def fetch_and_update(conn, region, run_timestamp):
+def fetch_and_update(conn, region, run_timestamp, args: argparse.Namespace):
     if args.backfill:
         l_result = []
         if args.days_for_backfill:
             for date_offset in range(args.days_for_backfill):
                 target_date = arrow.get().shift(days=-1 - date_offset).datetime
-                l_result += fetch_new_data(region, target_datetime=target_date)
+                l_result += fetch_new_data(region, args, target_datetime=target_date)
         elif args.backfill_begin_date and args.backfill_end_date:
             backfill_current_date = arrow.get(args.backfill_begin_date)
             backfill_end_date = arrow.get(args.backfill_end_date)
             while backfill_current_date <= backfill_end_date:
-                l_result += fetch_new_data(region, target_datetime=backfill_current_date.datetime)
+                l_result += fetch_new_data(region, args, target_datetime=backfill_current_date.datetime)
                 backfill_current_date = backfill_current_date.shift(days=1)
         else:
             raise NotImplementedError()
     else:
-        l_result = fetch_new_data(region)
+        l_result = fetch_new_data(region, args)
     if args.dry_run:
         print('Dry run mode on. Not updating database ...')
     else:
@@ -280,17 +281,17 @@ def should_run_now(conn, region, run_timestamp):
     return delta_since_last_update > map_regions[region]['updateFrequency']
 
 
-def crawl_region(conn, region):
+def crawl_region(conn, region, args: argparse.Namespace):
     print(f'Region: {region}')
     run_timestamp = datetime.now()
     if args.backfill or args.force:
-        fetch_and_update(conn, region, run_timestamp)
+        fetch_and_update(conn, region, run_timestamp, args)
     else:
         if should_run_now(conn, region, run_timestamp):
-            fetch_and_update(conn, region, run_timestamp)
+            fetch_and_update(conn, region, run_timestamp, args)
 
 
-def crawl_all_regions():
+def crawl_all_regions(args: argparse.Namespace):
     print("Electricity data crawler running at", str(datetime.now()))
     if args.dry_run:
         print('Dry run mode is on.')
@@ -313,7 +314,7 @@ def crawl_all_regions():
         if args.regions and region not in args.regions:
             continue
         try:
-            crawl_region(conn, region)
+            crawl_region(conn, region, args)
         except Exception as ex:
             print(datetime.now().isoformat(),
                   f"Exception occurred while crawling region {region}: {ex}",
@@ -323,4 +324,5 @@ def crawl_all_regions():
 
 
 if __name__ == '__main__':
-    crawl_all_regions()
+    args = parse_args()
+    crawl_all_regions(args)
