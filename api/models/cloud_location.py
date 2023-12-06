@@ -129,6 +129,6 @@ def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str
     (routers_latlon_str, fiber_wkt_paths, fiber_types_str) = records[0]
 
     routers_latlon: list[Coordinate] = [ast.literal_eval(t) for t in routers_latlon_str.split('|')]
-    fiber_types: list[str] = fiber_types_str.split('|')
+    fiber_types: list[str] = fiber_types_str.split('|') if fiber_types_str else []
 
     return routers_latlon, fiber_wkt_paths, fiber_types

@@ -160,6 +160,18 @@ def create_network_devices(router_latlons: list[Coordinate], fiber_wkt_paths: st
         return []
 
     try:
+        # TODO: remove this temporary workaround when we have all path information.
+        if not fiber_wkt_paths or not fiber_types:
+            network_devices = []
+            for gps in router_latlons:
+                # Already in (lat, lon) format
+                network_devices.append(NetworkDevice(NetworkDeviceType.ROUTER, gps, float.nan))
+                network_devices.append(NetworkDevice(NetworkDeviceType.WDM_SWITCH, gps, float.nan))
+                network_devices.append(NetworkDevice(NetworkDeviceType.WDM_SWITCH, gps, float.nan))
+                network_devices.append(NetworkDevice(NetworkDeviceType.TRANSPONDER, gps, float.nan))
+                network_devices.append(NetworkDevice(NetworkDeviceType.MUXPONDER, gps, float.nan))
+            return network_devices
+
         mls: MultiLineString = loads(fiber_wkt_paths)
         assert len(router_latlons) == len(mls.geoms) + 1, \
             f'Number of routers ({len(router_latlons)}) must be 1 + length of multi line string ({len(mls.geoms)})'
