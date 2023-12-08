@@ -119,9 +119,9 @@ def prepare_insert_query_args_from_history(history: list[dict]) -> list[tuple]:
     for entry in history:
         datetime = entry['datetime']
         zone_id = entry['zone']
-        carbon_intensity = entry.get('carbonIntensity', 0.0)
-        low_carbon_percentage = 0.00
-        renewable_percentage = 0.00
+        carbon_intensity = entry.get('carbonIntensity') or 'NaN'
+        low_carbon_percentage = 'NaN'
+        renewable_percentage = 'NaN'
         rows.append((datetime, zone_id, carbon_intensity, low_carbon_percentage, renewable_percentage))
     return rows
 
