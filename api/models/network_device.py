@@ -179,12 +179,6 @@ def create_network_devices(router_latlons: list[Coordinate], fiber_wkt_paths: st
             f'Number of fiber paths ({len(mls.geoms)}) must be equal to number of fiber types ({len(fiber_types)})'
         assert all(fiber_type in ['land', 'submarine'] for fiber_type in fiber_types), \
             f'Fiber type must be either "land" or "submarine"'
-        for i in range(len(fiber_types)):
-            if fiber_types[i] == 'submarine':
-                if i > 0:
-                    assert fiber_types[i - 1] != 'submarine', 'Submarine fiber must be surrounded by land fiber'
-                if i < len(fiber_types) - 1:
-                    assert fiber_types[i + 1] != 'submarine', 'Submarine fiber must be surrounded by land fiber'
 
         network_devices = []
 
