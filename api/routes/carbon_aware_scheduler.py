@@ -21,7 +21,7 @@ from api.models.common import CarbonDataSource, Coordinate, ISOName, get_iso_for
 from api.models.network_device import NetworkDevice, NetworkDeviceType, create_network_devices
 from api.models.optimization_engine import OptimizationEngine, OptimizationFactor
 from api.models.wan_bandwidth import load_wan_bandwidth_model
-from api.models.workload import DEFAULT_DC_PUE, DEFAULT_NETWORK_PUE, DEFAULT_NETWORK_REDUNDANCY, DEFAULT_STORAGE_POWER, CarbonAccountingMode, CloudLocation, Workload
+from api.models.workload import DEFAULT_DC_PUE, DEFAULT_NETWORK_PUE, DEFAULT_NETWORK_REDUNDANCY, DEFAULT_STORAGE_POWER, CarbonAccountingMode, CloudLocation, InterRegionRouteSource, Workload
 from api.models.dataclass_extensions import *
 from api.util import Rate, RateUnit, Size, SizeUnit, round_up, carbon_data_cache
 
@@ -311,13 +311,15 @@ def task_process_candidate(region: CloudRegion) -> tuple:
 
 def get_routes_by_region(original_location: str,
                          d_candidate_regions: dict[str, CloudRegion],
-                         carbon_accounting_mode: CarbonAccountingMode) -> dict[str, list[NetworkDevice]]:
+                         carbon_accounting_mode: CarbonAccountingMode,
+                         inter_region_route_source: InterRegionRouteSource) -> dict[str, list[NetworkDevice]]:
     d_region_route: dict[str, list[NetworkDevice]] = {}
     for candidate_region in d_candidate_regions:
         match carbon_accounting_mode:
             case CarbonAccountingMode.ComputeAndNetwork:
                 try:
-                    route_info = get_route_between_cloud_regions(original_location, candidate_region)
+                    route_info = get_route_between_cloud_regions(original_location, candidate_region,
+                                                                 inter_region_route_source)
                     d_region_route[candidate_region] = create_network_devices(*route_info)
                 except Exception as ex:
                     current_app.logger.error(f'Failed to get route between {original_location} and {candidate_region}: {ex}')
@@ -360,7 +362,7 @@ class CarbonAwareScheduler(Resource):
                                                   args.candidate_locations,
                                                   args.original_location)
         d_candidate_routes = get_routes_by_region(args.original_location, d_candidate_regions,
-                                                  args.carbon_accounting_mode)
+                                                  args.carbon_accounting_mode, args.inter_region_route_source)
         candidate_regions = list(d_candidate_regions.values())
         transfer_hops = list(set(hop for route in d_candidate_routes.values() if route for hop in route))
 

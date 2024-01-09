@@ -10,7 +10,7 @@ from marshmallow_dataclass import dataclass
 from api.models.common import CarbonDataSource
 
 # from api.models.common import Coordinate
-from api.models.cloud_location import CloudLocationManager
+from api.models.cloud_location import CloudLocationManager, InterRegionRouteSource
 from api.models.dataclass_extensions import *
 
 g_cloud_manager = CloudLocationManager()
@@ -149,6 +149,8 @@ class Workload:
 
     use_new_optimization: bool = field(default=True)
     carbon_accounting_mode: CarbonAccountingMode = field_enum(CarbonAccountingMode, CarbonAccountingMode.ComputeOnly)
+    inter_region_route_source: InterRegionRouteSource = field_enum(InterRegionRouteSource,
+                                                                   InterRegionRouteSource.ITDK)
 
     @validates_schema
     def validate_schema(self, data, **kwargs):

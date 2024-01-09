@@ -2,6 +2,7 @@
 
 import ast
 from dataclasses import dataclass
+from enum import Enum
 import os
 from pathlib import Path
 from flask import current_app
@@ -26,6 +27,14 @@ class CloudRegion:
 class PublicCloud:
     provider: str
     regions: list[CloudRegion]
+
+
+class InterRegionRouteSource(str, Enum):
+    ITDK = "itdk"
+    IGDB_NO_POPS = "igdb.no-pops"
+    IGDB_WITH_POPS = "igdb.with-pops"
+    ITDK_AND_IGDB_NO_POPS = "itdk+igdb.no-pops"
+    ITDK_AND_IGDB_WITH_POPS = "itdk+igdb.with-pops"
 
 
 class CloudLocationManager:
@@ -94,7 +103,8 @@ class CloudLocationManager:
                 return region
         raise NotFound('Unknown region "%s" for provider "%s".' % (region_code, cloud_provider))
 
-def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str) -> \
+def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str,
+                                    route_source: InterRegionRouteSource) -> \
         tuple[list[Coordinate], str, list[str]]:
     """Get the route between two cloud regions.
 
@@ -119,8 +129,9 @@ def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str
             """SELECT routers_latlon, fiber_wkt_paths, fiber_types FROM cloud_region_best_route
                 WHERE src_cloud = %s AND src_region = %s
                     AND dst_cloud = %s AND dst_region = %s
+                    AND source = %s
                     LIMIT 1;""",
-            [src_cloud, src_region, dst_cloud, dst_region])
+            [src_cloud, src_region, dst_cloud, dst_region, route_source])
 
     if len(records) < 1:
         current_app.logger.error(f'No route found between {src_cloud_region} and {dst_cloud_region}')
