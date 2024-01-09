@@ -4,5 +4,6 @@ CREATE INDEX index_cloud_region_route_distribution_weight ON cloud_region_route_
     src_region,
     dst_cloud,
     dst_region,
-    weight
+    weight,
+    source
 );
