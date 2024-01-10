@@ -135,8 +135,9 @@ def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str
             [src_cloud, src_region, dst_cloud, dst_region, route_source])
 
     if len(records) < 1:
-        current_app.logger.error(f'No route found between {src_cloud_region} and {dst_cloud_region}')
-        return None
+        error_message = f'No route found between {src_cloud_region} and {dst_cloud_region}'
+        current_app.logger.error(error_message)
+        raise ValueError(error_message)
 
     (routers_latlon_str, fiber_wkt_paths, fiber_types_str) = records[0]
 
