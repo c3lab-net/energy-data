@@ -6,5 +6,8 @@ CREATE TABLE cloud_region_route_distribution(
     weight Integer NOT NULL,
     hop_count Integer NOT NULL,
     distance_km FLOAT NOT NULL,
-    routers_latlon TEXT NOT NULL
+    routers_latlon TEXT NOT NULL,
+    fiber_wkt_paths TEXT NOT NULL,
+    fiber_types TEXT NOT NULL,
+    source VARCHAR(32) NOT NULL
 );

@@ -1,0 +1,9 @@
+network_device_energy_intensity:
+  # Energy intensity in W/Gbps
+  # Numbers from iGDB paper appendix C table 2
+  Router: 10
+  WDM Switch: 0.05
+  Transponder: 1.5
+  Muxponder: 1.5
+  Amplifier: 0.03
+  Regenerator: 3

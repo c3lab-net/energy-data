@@ -2,13 +2,15 @@
 
 import ast
 from dataclasses import dataclass
+from enum import Enum
 import os
 from pathlib import Path
 from flask import current_app
 from werkzeug.exceptions import NotFound
+from psycopg2 import sql
 
 from api.models.common import Coordinate
-from api.util import get_psql_connection, load_yaml_data, psql_execute_scalar
+from api.util import get_psql_connection, load_yaml_data, psql_execute_list
 
 @dataclass(unsafe_hash=True)
 class CloudRegion:
@@ -26,6 +28,14 @@ class CloudRegion:
 class PublicCloud:
     provider: str
     regions: list[CloudRegion]
+
+
+class InterRegionRouteSource(str, Enum):
+    ITDK = "itdk"
+    IGDB_NO_POPS = "igdb.no-pops"
+    IGDB_WITH_POPS = "igdb.with-pops"
+    ITDK_AND_IGDB_NO_POPS = "itdk+igdb.no-pops"
+    ITDK_AND_IGDB_WITH_POPS = "itdk+igdb.with-pops"
 
 
 class CloudLocationManager:
@@ -94,10 +104,20 @@ class CloudLocationManager:
                 return region
         raise NotFound('Unknown region "%s" for provider "%s".' % (region_code, cloud_provider))
 
-def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str) -> list[CloudRegion]:
-    """Get the list of intermediate hops between two cloud regions."""
+def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str,
+                                    route_source: InterRegionRouteSource) -> \
+        tuple[list[Coordinate], str, list[str]]:
+    """Get the route between two cloud regions.
+
+    Args:
+        src_cloud_region: The source cloud region in the format of "provider:code".
+        dst_cloud_region: The destination cloud region in the format of "provider:code".
+
+    Returns:
+        The router hop coordinates in (lat, lon)-format, the fiber paths in multi-linestring format, and the fiber types of each linestring.
+    """
     if src_cloud_region == dst_cloud_region:
-        return []
+        return [], '', []
 
     current_app.logger.debug('get_route_between_cloud_regions(%s, %s)' % (src_cloud_region, dst_cloud_region))
 
@@ -106,25 +126,23 @@ def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str
     (dst_cloud, dst_region) = dst_cloud_region.lower().split(':', 1)
     with get_psql_connection() as conn:
         cursor = conn.cursor()
-        routers_latlon: list[tuple[str]] = psql_execute_scalar(
+        records: str = psql_execute_list(
             cursor,
-            """SELECT routers_latlon FROM cloud_region_best_route
+            sql.SQL("""SELECT routers_latlon, fiber_wkt_paths, fiber_types FROM cloud_region_best_route
                 WHERE src_cloud = %s AND src_region = %s
                     AND dst_cloud = %s AND dst_region = %s
-                    LIMIT 1;""",
+                    AND source = {source}
+                    LIMIT 1;""").format(source=sql.Literal(route_source)),
             [src_cloud, src_region, dst_cloud, dst_region])
-    if not routers_latlon:
-        current_app.logger.error(f'No route found between {src_cloud_region} and {dst_cloud_region}')
-        return None
 
-    route_in_coordinates = [ast.literal_eval(t) for t in routers_latlon.split('|')]
-    current_app.logger.debug('route: %s' % route_in_coordinates)
+    if len(records) < 1:
+        error_message = f'No route found between {src_cloud_region} and {dst_cloud_region}'
+        current_app.logger.error(error_message)
+        raise ValueError(error_message)
 
-    route: list[CloudRegion] = []
-    for i in range(len(route_in_coordinates)):
-        coordinate = route_in_coordinates[i]
-        provider = f'{src_cloud_region}->{dst_cloud_region}'
-        cloud_region = CloudRegion(provider, f'hop{i}', f'Hop {i} of {provider}', None, coordinate)
-        route.append(cloud_region)
+    (routers_latlon_str, fiber_wkt_paths, fiber_types_str) = records[0]
 
-    return route
+    routers_latlon: list[Coordinate] = [ast.literal_eval(t) for t in routers_latlon_str.split('|')]
+    fiber_types: list[str] = fiber_types_str.split('|') if fiber_types_str else []
+
+    return routers_latlon, fiber_wkt_paths, fiber_types
