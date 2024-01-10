@@ -108,11 +108,12 @@ def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str
         tuple[list[Coordinate], str, list[str]]:
     """Get the route between two cloud regions.
 
-    This includes the router hop coordinates, the fiber paths in multilinestring, and the fiber types of each linestring.
-
     Args:
         src_cloud_region: The source cloud region in the format of "provider:code".
         dst_cloud_region: The destination cloud region in the format of "provider:code".
+
+    Returns:
+        The router hop coordinates in (lat, lon)-format, the fiber paths in multi-linestring format, and the fiber types of each linestring.
     """
     if src_cloud_region == dst_cloud_region:
         return [], '', []
