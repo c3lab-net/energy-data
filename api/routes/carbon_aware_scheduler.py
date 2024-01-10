@@ -2,6 +2,7 @@
 from datetime import timedelta, timezone
 import json
 from math import ceil
+import math
 from multiprocessing import Pool
 import traceback
 from typing import Any
@@ -259,15 +260,25 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
                         calculate_total_carbon_emissions = calculate_total_carbon_emissions_naive
 
                     runtime = end - start
-                    (compute_carbon_emissions, transfer_carbon_emission), timings = \
-                        calculate_total_carbon_emissions(start,
-                                                         runtime,
-                                                         max_delay,
-                                                         transfer_input_time,
-                                                         transfer_output_time,
-                                                         compute_carbon_emission_rates,
-                                                         transfer_carbon_emission_rates) \
-                                                            if workload.optimize_carbon else ((0, 0), {})
+                    if workload.optimize_carbon:
+                        (compute_carbon_emissions, transfer_carbon_emission), timings = \
+                            calculate_total_carbon_emissions(start,
+                                                            runtime,
+                                                            max_delay,
+                                                            transfer_input_time,
+                                                            transfer_output_time,
+                                                            compute_carbon_emission_rates,
+                                                            transfer_carbon_emission_rates)
+                    else:
+                        (compute_carbon_emissions, transfer_carbon_emission), timings = \
+                            ((math.nan, math.nan), {
+                                'min_start': start,
+                                'max_end': end + max_delay,
+                                'compute_duration': runtime,
+                                'input_transfer_duration': transfer_input_time,
+                                'output_transfer_duration': transfer_output_time,
+                                'total_transfer_time': transfer_input_time + transfer_output_time,
+                            })
                     d_scores[OptimizationFactor.CarbonEmissionFromCompute] = compute_carbon_emissions
                     d_scores[OptimizationFactor.CarbonEmissionFromMigration] = transfer_carbon_emission
                     d_misc['timings'].append(timings)
