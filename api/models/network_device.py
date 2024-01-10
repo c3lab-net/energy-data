@@ -2,6 +2,7 @@
 
 from enum import Enum
 from dataclasses import dataclass
+import math
 import os.path
 from pathlib import Path
 import traceback
@@ -165,11 +166,11 @@ def create_network_devices(router_latlons: list[Coordinate], fiber_wkt_paths: st
             network_devices = []
             for gps in router_latlons:
                 # Already in (lat, lon) format
-                network_devices.append(NetworkDevice(NetworkDeviceType.ROUTER, gps, float.nan))
-                network_devices.append(NetworkDevice(NetworkDeviceType.WDM_SWITCH, gps, float.nan))
-                network_devices.append(NetworkDevice(NetworkDeviceType.WDM_SWITCH, gps, float.nan))
-                network_devices.append(NetworkDevice(NetworkDeviceType.TRANSPONDER, gps, float.nan))
-                network_devices.append(NetworkDevice(NetworkDeviceType.MUXPONDER, gps, float.nan))
+                network_devices.append(NetworkDevice(NetworkDeviceType.ROUTER, gps, math.nan))
+                network_devices.append(NetworkDevice(NetworkDeviceType.WDM_SWITCH, gps, math.nan))
+                network_devices.append(NetworkDevice(NetworkDeviceType.WDM_SWITCH, gps, math.nan))
+                network_devices.append(NetworkDevice(NetworkDeviceType.TRANSPONDER, gps, math.nan))
+                network_devices.append(NetworkDevice(NetworkDeviceType.MUXPONDER, gps, math.nan))
             return network_devices
 
         mls: MultiLineString = loads(fiber_wkt_paths)
