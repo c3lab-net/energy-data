@@ -161,7 +161,7 @@ def create_network_devices(router_latlons: list[Coordinate], fiber_wkt_paths: st
         return []
 
     try:
-        # TODO: remove this temporary workaround when we have all path information.
+        # If no fiber paths are provided, create a simple network with only routers and router-attached devices.
         if not fiber_wkt_paths or not fiber_types:
             network_devices = []
             for gps in router_latlons:
