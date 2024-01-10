@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from flask import current_app
 from werkzeug.exceptions import NotFound
+from psycopg2 import sql
 
 from api.models.common import Coordinate
 from api.util import get_psql_connection, load_yaml_data, psql_execute_list
@@ -127,12 +128,12 @@ def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str
         cursor = conn.cursor()
         records: str = psql_execute_list(
             cursor,
-            """SELECT routers_latlon, fiber_wkt_paths, fiber_types FROM cloud_region_best_route
+            sql.SQL("""SELECT routers_latlon, fiber_wkt_paths, fiber_types FROM cloud_region_best_route
                 WHERE src_cloud = %s AND src_region = %s
                     AND dst_cloud = %s AND dst_region = %s
-                    AND source = %s
-                    LIMIT 1;""",
-            [src_cloud, src_region, dst_cloud, dst_region, route_source])
+                    AND source = {source}
+                    LIMIT 1;""").format(source=sql.Literal(route_source)),
+            [src_cloud, src_region, dst_cloud, dst_region])
 
     if len(records) < 1:
         error_message = f'No route found between {src_cloud_region} and {dst_cloud_region}'
