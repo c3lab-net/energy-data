@@ -44,6 +44,7 @@ def create_app():
     from api.routes.carbon_intensity import CarbonIntensity
     from api.routes.carbon_aware_scheduler import CarbonAwareScheduler
     from api.routes.energy_mixture import EnergyMixture
+    from api.routes.metadata import Metadata_CloudLocation_Providers, Metadata_CloudLocation_Locations
 
     # Alternatively, use this and `from varname import nameof`.
     errors_custom_responses = {
@@ -58,6 +59,9 @@ def create_app():
     api.add_resource(CarbonIntensity, '/carbon-intensity/')
     api.add_resource(CarbonAwareScheduler, '/carbon-aware-scheduler/')
     api.add_resource(EnergyMixture, '/energy-mixture/')
+
+    api.add_resource(Metadata_CloudLocation_Providers, '/metadata/cloud-location/providers/')
+    api.add_resource(Metadata_CloudLocation_Locations, '/metadata/cloud-location/locations/<string:provider>/')
 
     # Source: https://github.com/marshmallow-code/webargs/issues/181#issuecomment-621159812
     @webargs.flaskparser.parser.error_handler
