@@ -292,12 +292,12 @@ public_clouds:
     gps:
     - 41.2615
     - -95.8304
-  # - code: us-central2
-  #   name: gcloud:us-central2
-  #   iso: ''
-  #   gps:
-  #   - 36.1476
-  #   - -95.9761
+  - code: us-central2
+    name: gcloud:us-central2
+    iso: ''
+    gps:
+    - 36.1476
+    - -95.9761
   - code: us-east1
     name: Moncks Corner, South Carolina, North America
     iso: ''
@@ -310,12 +310,12 @@ public_clouds:
     gps:
     - 38.9057
     - -77.0319
-  # - code: us-east7
-  #   name: gcloud:us-east7
-  #   iso: ''
-  #   gps:
-  #   - 33.5226
-  #   - -86.8033
+  - code: us-east7
+    name: gcloud:us-east7
+    iso: ''
+    gps:
+    - 33.5226
+    - -86.8033
   - code: us-west1
     name: The Dalles, Oregon, North America
     iso: ''
