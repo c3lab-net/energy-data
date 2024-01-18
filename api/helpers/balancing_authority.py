@@ -93,6 +93,7 @@ def lookup_emap_balancing_authority(latitude: float, longitude: float) -> str:
         current_app.logger.error(f"Failed to parse Electricity map response: {e}")
         raise InternalServerError('Failed to parse Electricity map API response')
 
+@simple_cache.memoize(timeout=0)
 def get_iso_from_gps(latitude: float, longitude: float, iso_format: IsoFormat) -> str:
     """Get the ISO region name for the given latitude and longitude, using the specified ISO format."""
     match iso_format:

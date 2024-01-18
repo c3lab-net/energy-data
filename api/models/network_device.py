@@ -13,7 +13,7 @@ from geopy.distance import distance, lonlat
 from shapely.geometry import Point, LineString, MultiLineString
 
 from api.models.common import Coordinate, ISOName
-from api.util import load_yaml_data
+from api.util import load_yaml_data, simple_cache
 
 
 def get_network_device_energy_intensity_mapping(config_path: os.path) -> dict[str, float]:
@@ -145,6 +145,7 @@ def create_network_devices_along_path(mls: MultiLineString,
     return all_network_devices
 
 
+@simple_cache.memoize(timeout=0)
 def create_network_devices(router_latlons: list[Coordinate], fiber_wkt_paths: str, fiber_types: list[str]) -> \
         list[NetworkDevice]:
     """Create an ordered list of network devices given the router locations and the fiber paths among them.

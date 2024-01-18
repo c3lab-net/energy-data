@@ -4,7 +4,7 @@ import argparse
 from flask import current_app
 import requests_cache
 
-from api.util import simple_cache, exponential_backoff
+from api.util import exponential_backoff
 
 if __package__:
     from .util import get_auth_token
