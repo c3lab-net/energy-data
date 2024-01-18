@@ -34,7 +34,7 @@ def get_carbon_intensity_list(iso: str, start: datetime, end: datetime,
         Returns:
             A list of time series data.
     """
-    current_app.logger.info(f'Getting carbon intensity for {iso} in range ({start}, {end})')
+    current_app.logger.debug(f'Getting carbon intensity for {iso} in range ({start}, {end})')
     match carbon_data_source:
         case CarbonDataSource.C3Lab:
             return get_carbon_intensity_list_c3lab(iso, start, end, use_prediction, desired_renewable_ratio)
@@ -91,7 +91,7 @@ def calculate_total_carbon_emissions_naive(start: datetime, runtime: timedelta,
             Total carbon emissions in kgCO2.
             Optimal delay of start time, if applicable.
     """
-    current_app.logger.info('Calculating total carbon emissions ...')
+    current_app.logger.debug('Calculating total carbon emissions ...')
     perf_start_time = time.time()
     if runtime <= timedelta():
         raise BadRequest("Runtime must be positive.")
@@ -258,9 +258,9 @@ def calculate_total_carbon_emissions_naive(start: datetime, runtime: timedelta,
         pass
 
     perf_elapsed = time.time() - perf_start_time
-    current_app.logger.info('calculate_total_carbon_emissions() took %.3f seconds' % perf_elapsed)
-    current_app.logger.info('perf_counter_calculate_total = %d' % perf_counter_calculate_total)
-    current_app.logger.info('perf_counter_step_size = %d' % perf_counter_step_size)
+    current_app.logger.debug('calculate_total_carbon_emissions() took %.3f seconds' % perf_elapsed)
+    current_app.logger.debug('perf_counter_calculate_total = %d' % perf_counter_calculate_total)
+    current_app.logger.debug('perf_counter_step_size = %d' % perf_counter_step_size)
 
     curr_wait_times = min_time_values.copy()
 
@@ -309,7 +309,7 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
             Total carbon emissions in kgCO2.
             Optimal delay of start time, if applicable.
     """
-    current_app.logger.info('Calculating total carbon emissions ...')
+    current_app.logger.debug('Calculating total carbon emissions ...')
     if runtime <= timedelta():
         raise BadRequest("Runtime must be positive.")
 
@@ -564,7 +564,7 @@ def calculate_total_carbon_emissions_linear(start: datetime, runtime: timedelta,
     )
 
     perf_elapsed = time.time() - perf_start_time
-    current_app.logger.info('calculate_total_carbon_emissions() took %.3f seconds' % perf_elapsed)
+    current_app.logger.debug('calculate_total_carbon_emissions() took %.3f seconds' % perf_elapsed)
 
     (input_transfer_start, compute_start, output_transfer_start) = start_times
     input_transfer_end = input_transfer_start + input_transfer_time

@@ -214,7 +214,7 @@ def dump_emission_rates(ds: pd.Series) -> dict:
     return json.loads(ds.to_json(orient='index', date_format='iso'))
 
 def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[dict[OptimizationFactor, float], dict[str, Any]]:
-    current_app.logger.info('Calculating scores for region %s ...' % region)
+    current_app.logger.debug('Calculating scores for region %s ...' % region)
 
     global d_candidate_routes
     d_scores = {}
@@ -304,7 +304,7 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
                 # TODO: add WAN demand as weight
                 score = workload.dataset.input_size_gb + workload.dataset.output_size_gb
             case _:  # Other factors ignored
-                current_app.logger.info(f'Ignoring factor {factor} ...')
+                current_app.logger.debug(f'Ignoring factor {factor} ...')
                 score = 0
                 continue
         d_scores[factor] = score
@@ -383,6 +383,8 @@ class CarbonAwareScheduler(Resource):
         d_misc_details = dict()
         d_transit_hop_iso = dict()
 
+        current_app.logger.info(f'Looking up ISO for {len(candidate_regions)} regions and '
+                                f'{len(transfer_hops)} unique transit hops ...')
         all_regions = candidate_regions + transfer_hops
         with Pool(1 if __debug__ else 4,
                   initializer=init_lookup_iso,
@@ -403,6 +405,7 @@ class CarbonAwareScheduler(Resource):
         assign_iso_to_route_hops(d_candidate_routes, d_transit_hop_iso)
 
         all_unique_isos = set(d_region_isos.values()) | set(d_transit_hop_iso.values())
+        current_app.logger.info(f'Loading carbon data for {len(all_unique_isos)} unique regions ...')
         carbon_data = dict()
         d_iso_errors = dict()
         with Pool(1 if __debug__ else 4,
@@ -419,6 +422,7 @@ class CarbonAwareScheduler(Resource):
                 current_app.logger.error(f'Carbon data lookup failed for {iso}: {ex}')
                 current_app.logger.error(stack_trace)
 
+        current_app.logger.info(f'Calculating scores for {len(candidate_regions)} regions ...')
         with Pool(1 if __debug__ else 8,
                   initializer=init_parallel_process_candidate,
                   initargs=(workload, args.carbon_data_source, args.use_prediction, carbon_data, d_candidate_routes)
@@ -439,6 +443,7 @@ class CarbonAwareScheduler(Resource):
                     current_app.logger.error(f'Exception when calculating score for region {region_name}: {ex}')
                     current_app.logger.error(stack_trace)
 
+        current_app.logger.info(f'Comparing {len(d_region_scores)} regions ...')
         optimal_regions, d_weighted_scores = g_optimizer.compare_candidates(d_region_scores, True)
         if not optimal_regions:
             return orig_request | {
