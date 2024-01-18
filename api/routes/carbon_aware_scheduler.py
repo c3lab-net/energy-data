@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from collections import defaultdict
 from datetime import timedelta, timezone
 import json
 from math import ceil
@@ -197,17 +198,20 @@ def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: dateti
     # Transfer power includes both end hosts and network devices
     ds_network = pd.Series(dtype=float)
     ds_endpoints = pd.Series(dtype=float)
-    for i in range(len(route)):
-        iso = route[i].iso
-        # Part 1: Network power consumption from all devices
-        per_hop_power_in_watts = route[i].get_energy_intensity_w_per_gbps() * transfer_rate.gbps() * \
+    # Part 1: Network power consumption from all devices
+    total_network_power_per_iso = defaultdict(float)
+    for hop in route:
+        per_hop_power_in_watts = hop.get_energy_intensity_w_per_gbps() * transfer_rate.gbps() * \
             DEFAULT_NETWORK_PUE * DEFAULT_NETWORK_REDUNDANCY
-        ds_hop = get_carbon_emission_rates(iso, start, end, per_hop_power_in_watts)
+        # Too many hops counting all network devices, so summarize by ISO first and then request timeseries.
+        total_network_power_per_iso[hop.iso] += per_hop_power_in_watts
+    for iso in total_network_power_per_iso:
+        ds_hop = get_carbon_emission_rates(iso, start, end, total_network_power_per_iso[iso])
         ds_network = ds_network.add(ds_hop, fill_value=0)
-        # Part 2: End host power consumption, at the locations of the first and last hop.
-        if i == 0 or i == len(route) - 1:
-            ds_endpoint = get_carbon_emission_rates(iso, start, end, host_transfer_power_in_watts)
-            ds_endpoints = ds_endpoints.add(ds_endpoint, fill_value=0)
+    # Part 2: End host power consumption, at the locations of the first and last hop.
+    for hop in [route[0], route[-1]]:
+        ds_endpoint = get_carbon_emission_rates(hop.iso, start, end, host_transfer_power_in_watts)
+        ds_endpoints = ds_endpoints.add(ds_endpoint, fill_value=0)
     return (ds_network.add(ds_endpoints, fill_value=0), ds_network, ds_endpoints)
 
 def dump_emission_rates(ds: pd.Series) -> dict:
