@@ -10,7 +10,7 @@ from werkzeug.exceptions import NotFound
 from psycopg2 import sql
 
 from api.models.common import Coordinate
-from api.util import get_psql_connection, load_yaml_data, psql_execute_list
+from api.util import get_psql_connection, load_yaml_data, psql_execute_list, simple_cache
 
 @dataclass(unsafe_hash=True)
 class CloudRegion:
@@ -104,6 +104,7 @@ class CloudLocationManager:
                 return region
         raise NotFound('Unknown region "%s" for provider "%s".' % (region_code, cloud_provider))
 
+@simple_cache.memoize(timeout=0)
 def get_route_between_cloud_regions(src_cloud_region: str, dst_cloud_region: str,
                                     route_source: InterRegionRouteSource) -> \
         tuple[list[Coordinate], str, list[str]]:

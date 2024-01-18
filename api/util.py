@@ -2,10 +2,12 @@
 
 from copy import deepcopy
 from enum import Enum, IntEnum
+from functools import wraps
+import logging
 import random
 from typing import Any, Callable, Sequence, Union
 from datetime import datetime, date, timedelta, time
-from time import sleep
+from time import sleep, time
 import yaml
 import traceback
 import psycopg2
@@ -333,3 +335,27 @@ def exponential_backoff(max_retries: int = 3,
                         raise
         return wrapper
     return decorator
+
+LOGGING_LEVEL_RUNTIME = 25
+logging.addLevelName(25, "RUNTIME")
+
+def log_runtime(f):
+    @wraps(f)
+    def wrap(*args, **kwargs):
+        t_start = time()
+        result = f(*args, **kwargs)
+        t_end = time()
+
+
+        def _modified_str(o):
+            if any([isinstance(o, t) for t in (list, dict, set)]):
+                return o if len(o) < 3 else f"{type(o)}[{len(o)}]"
+            else:
+                return o
+        modified_args = [_modified_str(arg) for arg in args]
+        modified_kwargs = {key: _modified_str(value) for key, value in kwargs.items()}
+        current_app.logger.log(LOGGING_LEVEL_RUNTIME,
+                               'func:%s.%s args:[%s, %s] took: %2.4f sec',
+                               f.__module__, f.__name__, modified_args, modified_kwargs, t_end-t_start)
+        return result
+    return wrap
