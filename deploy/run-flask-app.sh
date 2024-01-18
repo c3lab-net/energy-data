@@ -25,8 +25,9 @@ if [[ -n $DEBUG ]]; then
      --reload \
     'api:create_app()'
 else
-  gunicorn --workers=4 \
+  gunicorn --workers=32 \
     --log-level=info \
+    -t=60 \
     --access-logfile - \
     --access-logformat '%({X-Real-IP}i)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s %(M)s "%(f)s" "%(a)s"' \
     'api:create_app()'
