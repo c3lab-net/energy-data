@@ -24,7 +24,7 @@ from api.models.optimization_engine import OptimizationEngine, OptimizationFacto
 from api.models.wan_bandwidth import load_wan_bandwidth_model
 from api.models.workload import DEFAULT_DC_PUE, DEFAULT_NETWORK_PUE, DEFAULT_NETWORK_REDUNDANCY, DEFAULT_STORAGE_POWER, CarbonAccountingMode, CloudLocation, InterRegionRouteSource, Workload
 from api.models.dataclass_extensions import *
-from api.util import Rate, RateUnit, Size, SizeUnit, round_up, carbon_data_cache
+from api.util import Rate, RateUnit, Size, SizeUnit, round_up, log_runtime
 
 g_cloud_manager = CloudLocationManager()
 OPTIMIZATION_FACTORS_AND_WEIGHTS = [
@@ -320,6 +320,7 @@ def task_process_candidate(region: CloudRegion) -> tuple:
     except Exception as ex:
         return region_name, iso, None, None, str(ex), traceback.format_exc()
 
+@log_runtime
 def get_routes_by_region(original_location: str,
                          d_candidate_regions: dict[str, CloudRegion],
                          carbon_accounting_mode: CarbonAccountingMode,
@@ -358,6 +359,7 @@ def assign_iso_to_route_hops(d_candidate_routes: dict[str, list[NetworkDevice]],
                 d_candidate_routes[candidate][i].iso = None
 
 class CarbonAwareScheduler(Resource):
+    @log_runtime
     @use_args(marshmallow_dataclass.class_schema(Workload)())
     def get(self, args: Workload):
         workload = args
@@ -386,10 +388,13 @@ class CarbonAwareScheduler(Resource):
         current_app.logger.info(f'Looking up ISO for {len(candidate_regions)} regions and '
                                 f'{len(transfer_hops)} unique transit hops ...')
         all_regions = candidate_regions + transfer_hops
-        with Pool(1 if __debug__ else 4,
-                  initializer=init_lookup_iso,
-                  initargs=(args.carbon_data_source,)) as pool:
-            result_iso = pool.map(task_lookup_iso, all_regions)
+        @log_runtime
+        def _lookup_all_isos(all_regions):
+            with Pool(1 if __debug__ else 4,
+                    initializer=init_lookup_iso,
+                    initargs=(args.carbon_data_source,)) as pool:
+                return pool.map(task_lookup_iso, all_regions)
+        result_iso = _lookup_all_isos(all_regions)
         for i in range(len(all_regions)):
             (region_name, iso, gps, ex, stack_trace) = result_iso[i]
             if iso:
@@ -408,12 +413,15 @@ class CarbonAwareScheduler(Resource):
         current_app.logger.info(f'Loading carbon data for {len(all_unique_isos)} unique regions ...')
         carbon_data = dict()
         d_iso_errors = dict()
-        with Pool(1 if __debug__ else 4,
-                  initializer=init_preload_carbon_data,
-                  initargs=(workload, args.carbon_data_source, args.use_prediction,
-                            args.desired_renewable_ratio)
-                  ) as pool:
-            result = pool.map(task_preload_carbon_data, all_unique_isos)
+        @log_runtime
+        def _preload_all_carbon_data(all_unique_isos):
+            with Pool(1 if __debug__ else 4,
+                    initializer=init_preload_carbon_data,
+                    initargs=(workload, args.carbon_data_source, args.use_prediction,
+                                args.desired_renewable_ratio)
+                    ) as pool:
+                return pool.map(task_preload_carbon_data, all_unique_isos)
+        result = _preload_all_carbon_data(all_unique_isos)
         for (iso, partial_carbon_data, ex, stack_trace) in result:
             if partial_carbon_data:
                 carbon_data |= partial_carbon_data
@@ -423,11 +431,14 @@ class CarbonAwareScheduler(Resource):
                 current_app.logger.error(stack_trace)
 
         current_app.logger.info(f'Calculating scores for {len(candidate_regions)} regions ...')
-        with Pool(1 if __debug__ else 8,
-                  initializer=init_parallel_process_candidate,
-                  initargs=(workload, args.carbon_data_source, args.use_prediction, carbon_data, d_candidate_routes)
-                  ) as pool:
-            result = pool.map(task_process_candidate, candidate_regions)
+        @log_runtime
+        def _process_all_candidates(candidate_regions):
+            with Pool(1 if __debug__ else 8,
+                    initializer=init_parallel_process_candidate,
+                    initargs=(workload, args.carbon_data_source, args.use_prediction, carbon_data, d_candidate_routes)
+                    ) as pool:
+                return pool.map(task_process_candidate, candidate_regions)
+        result = _process_all_candidates(candidate_regions)
         for (region_name, iso, scores, d_misc, ex, stack_trace) in result:
             d_region_isos[region_name] = iso
             if not (ex or stack_trace):
