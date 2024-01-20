@@ -2,15 +2,16 @@
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from flask import current_app
+from psycopg2 import sql
 from werkzeug.exceptions import InternalServerError
 from api.models.common import IsoFormat
 from api.models.common import ISO_PREFIX_WATTTIME
 from api.models.common import ISO_PREFIX_C3LAB
 from api.models.common import ISO_PREFIX_EMAP
 
-from api.util import CustomHTTPException, load_yaml_data, simple_cache
+from api.util import CustomHTTPException, get_psql_connection, load_yaml_data, psql_execute_scalar, simple_cache
 from api.external.watttime.ba_from_loc import get_watttime_ba_from_loc
 from api.external.electricitymap.ba_from_loc import get_emap_ba_from_loc
 
@@ -74,8 +75,7 @@ def lookup_watttime_balancing_authority(latitude: float, longitude: float) -> di
     }
 
 
-@simple_cache.memoize(timeout=0)
-def lookup_emap_balancing_authority(latitude: float, longitude: float) -> str:
+def lookup_emap_balancing_authority_from_api(latitude: float, longitude: float) -> str:
     """Lookup the balancing authority from EMAP API, and returns the zone id (country code)."""
     current_app.logger.debug(f'lookup_emap_balancing_authority({latitude}, {longitude})')
     emap_response = get_emap_ba_from_loc(latitude, longitude)
@@ -92,6 +92,60 @@ def lookup_emap_balancing_authority(latitude: float, longitude: float) -> str:
         current_app.logger.error('Response: %s' % emap_json)
         current_app.logger.error(f"Failed to parse Electricity map response: {e}")
         raise InternalServerError('Failed to parse Electricity map API response')
+
+BALANCING_AUTHORITY_PROVIDER_EMAP = 'electricitymap'
+
+def lookup_emap_balancing_authority_from_database(latitude: float, longitude: float) -> Optional[str]:
+    current_app.logger.debug(f'lookup_emap_balancing_authority_from_database({latitude}, {longitude})')
+    try:
+        with get_psql_connection() as conn:
+            cursor = conn.cursor()
+            return psql_execute_scalar(
+                cursor,
+                sql.SQL("""(SELECT balancing_authority FROM balancing_authority
+                                WHERE provider = {provider} AND
+                                    latitude = %(latitude)s AND longitude = %(longitude)s)
+                            UNION ALL
+                            (SELECT balancing_authority FROM balancing_authority
+                                WHERE provider = {provider} AND
+                                    ABS(latitude - %(latitude)s) <= 0.1 AND ABS(longitude - %(longitude)s) <= 0.1
+                                ORDER BY ABS(latitude - %(latitude)s) + ABS(longitude - %(longitude)s)
+                                LIMIT 1)
+                            LIMIT 1;""").format(
+                                provider = sql.Literal(BALANCING_AUTHORITY_PROVIDER_EMAP)
+                                ),
+                        dict(latitude=latitude, longitude=longitude))
+    except Exception as e:
+        current_app.logger.error(f"Failed to lookup balancing authority from database: {e}")
+        return None
+
+def save_emap_balancing_authority_to_database(latitude: float, longitude: float, ba: str) -> None:
+    current_app.logger.info(f'save_emap_balancing_authority_to_database({latitude}, {longitude}, {ba})')
+    try:
+        with get_psql_connection() as conn:
+            cursor = conn.cursor()
+            psql_execute_scalar(
+                cursor,
+                sql.SQL("""INSERT INTO balancing_authority (latitude, longitude, provider, balancing_authority)
+                            VALUES (%s, %s, {provider}, %s)
+                            ON CONFLICT DO NOTHING;""").format(
+                                provider = sql.Literal(BALANCING_AUTHORITY_PROVIDER_EMAP)
+                                ),
+                        [latitude, longitude, ba])
+    except Exception as e:
+        current_app.logger.warning(f"Failed to save balancing authority to database: {e}")
+        # Fail silently, as this is not critical
+
+@simple_cache.memoize(timeout=0)
+def lookup_emap_balancing_authority(latitude: float, longitude: float) -> str:
+    # Check if we have saved the result in the database
+    ba = lookup_emap_balancing_authority_from_database(latitude, longitude)
+    if ba is not None:
+        return ba
+    else:
+        ba = lookup_emap_balancing_authority_from_api(latitude, longitude)
+        save_emap_balancing_authority_to_database(latitude, longitude, ba)
+        return ba
 
 @simple_cache.memoize(timeout=0)
 def get_iso_from_gps(latitude: float, longitude: float, iso_format: IsoFormat) -> str:
