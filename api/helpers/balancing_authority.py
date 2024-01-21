@@ -55,7 +55,7 @@ def convert_watttime_ba_abbrev_to_c3lab_region(watttime_abbrev) -> str:
 def lookup_watttime_balancing_authority(latitude: float, longitude: float) -> dict[str, Any]:
     """
         Lookup the balancing authority from WattTime API, and returns the WattTime lookup result."""
-    current_app.logger.debug(f'lookup_watttime_balancing_authority({latitude}, {longitude})')
+    current_app.logger.info(f'lookup_watttime_balancing_authority({latitude}, {longitude})')
     watttime_response = get_watttime_ba_from_loc(latitude, longitude)
     watttime_json = watttime_response.json()
 
@@ -79,7 +79,7 @@ def lookup_watttime_balancing_authority(latitude: float, longitude: float) -> di
 
 def lookup_emap_balancing_authority_from_api(latitude: float, longitude: float) -> str:
     """Lookup the balancing authority from EMAP API, and returns the zone id (country code)."""
-    current_app.logger.debug(f'lookup_emap_balancing_authority({latitude}, {longitude})')
+    current_app.logger.info(f'lookup_emap_balancing_authority({latitude}, {longitude})')
     emap_response = get_emap_ba_from_loc(latitude, longitude)
     emap_json = emap_response.json()
 
