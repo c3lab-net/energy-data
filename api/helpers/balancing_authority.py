@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 
+from collections import defaultdict
 import os
 from pathlib import Path
+import traceback
 from typing import Any, Optional
 from flask import current_app
 from psycopg2 import sql
 from werkzeug.exceptions import InternalServerError
-from api.models.common import IsoFormat
+from api.models.common import Coordinate, IsoFormat
 from api.models.common import ISO_PREFIX_WATTTIME
 from api.models.common import ISO_PREFIX_C3LAB
 from api.models.common import ISO_PREFIX_EMAP
 
-from api.util import CustomHTTPException, get_psql_connection, load_yaml_data, psql_execute_scalar, simple_cache
+from api.util import CustomHTTPException, get_psql_connection, load_yaml_data, log_runtime, psql_execute_list, psql_execute_scalar, psql_execute_values, simple_cache, iso_cache
 from api.external.watttime.ba_from_loc import get_watttime_ba_from_loc
 from api.external.electricitymap.ba_from_loc import get_emap_ba_from_loc
 
@@ -93,31 +95,39 @@ def lookup_emap_balancing_authority_from_api(latitude: float, longitude: float) 
         current_app.logger.error(f"Failed to parse Electricity map response: {e}")
         raise InternalServerError('Failed to parse Electricity map API response')
 
-BALANCING_AUTHORITY_PROVIDER_EMAP = 'electricitymap'
-
-def lookup_emap_balancing_authority_from_database(latitude: float, longitude: float) -> Optional[str]:
-    current_app.logger.debug(f'lookup_emap_balancing_authority_from_database({latitude}, {longitude})')
+@log_runtime
+def lookup_balancing_authorities_from_database(coordinates: list[Coordinate],
+                                               iso_format: IsoFormat,
+                                               exact_match = True) -> list[tuple[float, float, str]]:
+    """Lookup the balancing authority from database, and returns the matched coordinate and balancing authority."""
+    if len(coordinates) == 0:
+        return []
     try:
+        if exact_match:
+            balancing_authority_table_name = 'balancing_authority'
+        else:
+            balancing_authority_table_name = 'balancing_authority_loose_granularity'
+            coordinates = [(round(latitude, 1), round(longitude, 1)) for latitude, longitude in coordinates]
         with get_psql_connection() as conn:
             cursor = conn.cursor()
-            return psql_execute_scalar(
+            return psql_execute_values(
                 cursor,
-                sql.SQL("""(SELECT balancing_authority FROM balancing_authority
-                                WHERE provider = {provider} AND
-                                    latitude = %(latitude)s AND longitude = %(longitude)s)
-                            UNION ALL
-                            (SELECT balancing_authority FROM balancing_authority
-                                WHERE provider = {provider} AND
-                                    ABS(latitude - %(latitude)s) <= 0.1 AND ABS(longitude - %(longitude)s) <= 0.1
-                                ORDER BY ABS(latitude - %(latitude)s) + ABS(longitude - %(longitude)s)
-                                LIMIT 1)
-                            LIMIT 1;""").format(
-                                provider = sql.Literal(BALANCING_AUTHORITY_PROVIDER_EMAP)
+                sql.SQL("""WITH input (latitude, longitude) AS (VALUES %s)
+                            SELECT input.latitude, input.longitude, ba.balancing_authority
+                                FROM input LEFT JOIN {table} ba ON (
+                                    input.latitude = ba.latitude AND
+                                    input.longitude = ba.longitude AND
+                                    provider = {provider}
+                                );""").format(
+                                    table = sql.Identifier(balancing_authority_table_name),
+                                    provider = sql.Literal(iso_format)
                                 ),
-                        dict(latitude=latitude, longitude=longitude))
+                        coordinates,
+                        page_size=len(coordinates))
     except Exception as e:
-        current_app.logger.error(f"Failed to lookup balancing authority from database: {e}")
-        return None
+        current_app.logger.error(f"Failed to lookup balancing authorities from database: {e}")
+        current_app.logger.error(traceback.format_exc())
+        raise e
 
 def save_emap_balancing_authority_to_database(latitude: float, longitude: float, ba: str) -> None:
     current_app.logger.info(f'save_emap_balancing_authority_to_database({latitude}, {longitude}, {ba})')
@@ -129,38 +139,69 @@ def save_emap_balancing_authority_to_database(latitude: float, longitude: float,
                 sql.SQL("""INSERT INTO balancing_authority (latitude, longitude, provider, balancing_authority)
                             VALUES (%s, %s, {provider}, %s)
                             ON CONFLICT DO NOTHING;""").format(
-                                provider = sql.Literal(BALANCING_AUTHORITY_PROVIDER_EMAP)
+                                provider = sql.Literal(ba)
                                 ),
                         [latitude, longitude, ba])
     except Exception as e:
         current_app.logger.warning(f"Failed to save balancing authority to database: {e}")
         # Fail silently, as this is not critical
 
-@simple_cache.memoize(timeout=0)
 def lookup_emap_balancing_authority(latitude: float, longitude: float) -> str:
-    # Check if we have saved the result in the database
-    ba = lookup_emap_balancing_authority_from_database(latitude, longitude)
-    if ba is not None:
-        return ba
-    else:
-        ba = lookup_emap_balancing_authority_from_api(latitude, longitude)
-        save_emap_balancing_authority_to_database(latitude, longitude, ba)
-        return ba
+    balancing_authority = lookup_emap_balancing_authority_from_api(latitude, longitude)
+    # save_emap_balancing_authority_to_database(latitude, longitude, balancing_authority)
+    return balancing_authority
 
-@simple_cache.memoize(timeout=0)
+
 def get_iso_from_gps(latitude: float, longitude: float, iso_format: IsoFormat) -> str:
     """Get the ISO region name for the given latitude and longitude, using the specified ISO format."""
     match iso_format:
         case IsoFormat.C3Lab:
-            return convert_watttime_ba_abbrev_to_c3lab_region(
+            iso = convert_watttime_ba_abbrev_to_c3lab_region(
                 lookup_watttime_balancing_authority(latitude, longitude)['watttime_abbrev'])
         case IsoFormat.WattTime:
-            return ISO_PREFIX_WATTTIME + lookup_watttime_balancing_authority(latitude, longitude)['watttime_abbrev']
+            iso = ISO_PREFIX_WATTTIME + lookup_watttime_balancing_authority(latitude, longitude)['watttime_abbrev']
         case IsoFormat.EMap:
-            return ISO_PREFIX_EMAP + lookup_emap_balancing_authority(latitude, longitude)
+            iso = ISO_PREFIX_EMAP + lookup_emap_balancing_authority(latitude, longitude)
         case _:
             raise NotImplementedError(f'Unknown ISO format {iso_format}')
+    iso_cache.set((latitude, longitude, iso_format), iso)
+    return iso
 
+@log_runtime
+def get_cached_isos_from_gps(coordinates: list[Coordinate], iso_format: IsoFormat) -> list[Optional[str]]:
+    length = len(coordinates)
+    cached_isos = [None] * length
+
+    d_coordinates_indices = defaultdict(list)
+    # Lookup in-memory cache first
+    for i in range(length):
+        coordinate = coordinates[i]
+        cached_iso = iso_cache.get((coordinate[0], coordinate[1], iso_format))
+        if cached_iso is not None:
+            cached_isos[i] = cached_iso
+        else:
+            # If not found, lookup in database
+            d_coordinates_indices[coordinate].append(i)
+
+    # Lookup in database
+    database_query_coordinates = list(d_coordinates_indices.keys())
+    match iso_format:
+        case IsoFormat.EMap:
+            rows_loose_match = lookup_balancing_authorities_from_database(database_query_coordinates, iso_format, False)
+            rows_exact_match = lookup_balancing_authorities_from_database(database_query_coordinates, iso_format)
+            for latitude, longitude, balancing_authority in rows_loose_match + rows_exact_match:
+                latitude = float(latitude)
+                longitude = float(longitude)
+                if not balancing_authority:
+                    continue
+                for i in d_coordinates_indices[(latitude, longitude)]:
+                    cached_isos[i] = ISO_PREFIX_EMAP + balancing_authority
+                    iso_cache.set((latitude, longitude, iso_format), cached_isos[i])
+        case _:
+            # No caching for other ISO formats
+            pass
+
+    return cached_isos
 
 # def get_all_balancing_authorities():
 #     """Return a list of all balancing authorities for which we have collect data."""

@@ -9,7 +9,7 @@ import secrets
 import logging
 from werkzeug.exceptions import UnprocessableEntity, HTTPException
 
-from api.util import DocstringDefaultException, CustomJSONEncoder, simple_cache, carbon_data_cache
+from api.util import DocstringDefaultException, CustomJSONEncoder, simple_cache, carbon_data_cache, iso_cache
 
 
 class CustomApi(Api):
@@ -33,6 +33,7 @@ def create_app():
         'cls': CustomJSONEncoder
     }
     simple_cache.init_app(app)
+    iso_cache.init_app(app)
     carbon_data_cache.init_app(app)
     if __name__ != '__main__':
         # Source: https://trstringer.com/logging-flask-gunicorn-the-manageable-way/
