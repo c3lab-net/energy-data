@@ -107,10 +107,14 @@ def lookup_balancing_authorities_from_database(coordinates: list[Coordinate],
             balancing_authority_table_name = 'balancing_authority'
         else:
             balancing_authority_table_name = 'balancing_authority_loose_granularity'
-            coordinates = [(round(latitude, 1), round(longitude, 1)) for latitude, longitude in coordinates]
+            d_loose_coordinate_to_exact_coordinates: dict[Coordinate, list[Coordinate]] = defaultdict(list)
+            for latitude, longitude in coordinates:
+                loose_coordinate = (round(latitude, 1), round(longitude, 1))
+                d_loose_coordinate_to_exact_coordinates[loose_coordinate].append((latitude, longitude))
+            coordinates = list(d_loose_coordinate_to_exact_coordinates.keys())
         with get_psql_connection() as conn:
             cursor = conn.cursor()
-            return psql_execute_values(
+            rows = psql_execute_values(
                 cursor,
                 sql.SQL("""WITH input (latitude, longitude) AS (VALUES %s)
                             SELECT input.latitude, input.longitude, ba.balancing_authority
@@ -124,6 +128,13 @@ def lookup_balancing_authorities_from_database(coordinates: list[Coordinate],
                                 ),
                         coordinates,
                         page_size=len(coordinates))
+            rows = [(float(latitude), float(longitude), ba) for latitude, longitude, ba in rows]
+            if not exact_match:
+                # Map back to original coordinates
+                rows = [(latitude, longitude, balancing_authority)
+                        for loose_lat, loose_lon, balancing_authority in rows
+                        for latitude, longitude in d_loose_coordinate_to_exact_coordinates[(loose_lat, loose_lon)]]
+            return rows
     except Exception as e:
         current_app.logger.error(f"Failed to lookup balancing authorities from database: {e}")
         current_app.logger.error(traceback.format_exc())
@@ -190,8 +201,6 @@ def get_cached_isos_from_gps(coordinates: list[Coordinate], iso_format: IsoForma
             rows_loose_match = lookup_balancing_authorities_from_database(database_query_coordinates, iso_format, False)
             rows_exact_match = lookup_balancing_authorities_from_database(database_query_coordinates, iso_format)
             for latitude, longitude, balancing_authority in rows_loose_match + rows_exact_match:
-                latitude = float(latitude)
-                longitude = float(longitude)
                 if not balancing_authority:
                     continue
                 for i in d_coordinates_indices[(latitude, longitude)]:
