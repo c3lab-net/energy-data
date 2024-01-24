@@ -38,6 +38,9 @@ g_optimizer = OptimizationEngine([t[0] for t in OPTIMIZATION_FACTORS_AND_WEIGHTS
 g_wan_bandwidth = load_wan_bandwidth_model()
 
 
+class NoCarbonException(ValueError):
+    pass
+
 def get_candidate_regions(candidate_providers: list[str], candidate_locations: list[CloudLocation],
                           original_location: str) \
         -> dict[str, CloudRegion]:
@@ -157,7 +160,7 @@ def get_preloaded_carbon_data(iso: str, start: datetime, end: datetime) -> pd.Se
     if key in carbon_data_store:
         return carbon_data_store[key]
     else:
-        raise ValueError(f'No carbon data found for iso {iso} in time range ({start}, {end})')
+        raise NoCarbonException(f'No carbon data found for iso {iso} in time range ({start}, {end})')
 
 def get_transfer_rate(route: list[NetworkDevice], start: datetime, end: datetime, max_delay: timedelta) -> Rate:
     # TODO: update this to consider route
@@ -214,27 +217,54 @@ def get_carbon_emission_rates(iso: ISOName, start: datetime, end: datetime, powe
 
 def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: datetime, end: datetime,
                                        transfer_rate: Rate, host_transfer_power_in_watts: float) -> \
-                                        tuple[pd.Series,pd.Series,pd.Series]:
+                                        tuple[pd.Series,pd.Series,pd.Series, float]:
     if len(route) == 0: # Same region, no transfer needed.
-        return [pd.Series(dtype=float),pd.Series(dtype=float),pd.Series(dtype=float)]
+        return [pd.Series(dtype=float),pd.Series(dtype=float),pd.Series(dtype=float), None]
+
     # Transfer power includes both end hosts and network devices
-    ds_network = pd.Series(dtype=float)
-    ds_endpoints = pd.Series(dtype=float)
+
     # Part 1: Network power consumption from all devices
+    ds_network = pd.Series(dtype=float)
+
+    # Group devices by their ISO to minimize timeseries operations.
     total_network_power_per_iso = defaultdict(float)
     for hop in route:
         per_hop_power_in_watts = hop.get_energy_intensity_w_per_gbps() * transfer_rate.gbps() * \
             DEFAULT_NETWORK_PUE * DEFAULT_NETWORK_REDUNDANCY
         # Too many hops counting all network devices, so summarize by ISO first and then request timeseries.
         total_network_power_per_iso[hop.iso] += per_hop_power_in_watts
-    for iso in total_network_power_per_iso:
-        ds_hop = get_carbon_emission_rates(iso, start, end, total_network_power_per_iso[iso])
-        ds_network = ds_network.add(ds_hop, fill_value=0)
+
+    # If carbon data is not available for a small portion of the hops (in total power), we'll use re-scale
+    #   carbon emission rate based on this ratio of power with carbon data and total power.
+    sum_network_power_without_carbon_data = 0.
+    no_carbon_isos: list[str] = []
+    for iso, network_power_per_iso in total_network_power_per_iso.items():
+        try:
+            ds_hop = get_carbon_emission_rates(iso, start, end, network_power_per_iso)
+            ds_network = ds_network.add(ds_hop, fill_value=0)
+        except NoCarbonException:
+            sum_network_power_without_carbon_data += network_power_per_iso
+            no_carbon_isos.append(iso)
+
+    # Requires a minimum ratio of carbon data availability to avoid over-estimation.
+    AVAILABLE_RATIO_THRESHOLD = 0.66
+    total_network_power = sum(total_network_power_per_iso.values())
+    power_ratio_with_carbon_data = 1 - sum_network_power_without_carbon_data / total_network_power
+    if power_ratio_with_carbon_data > AVAILABLE_RATIO_THRESHOLD:
+        current_app.logger.warning(f'Carbon data is only available for {sum_network_power_without_carbon_data} W '
+                                   f'out of {total_network_power} W network power')
+        ds_network /= power_ratio_with_carbon_data
+    else:
+        raise ValueError(
+            f'Carbon data is only available for {power_ratio_with_carbon_data} of the network power '
+            f'(need at least {AVAILABLE_RATIO_THRESHOLD}). ISOs with missing carbon data: {no_carbon_isos}')
+
     # Part 2: End host power consumption, at the locations of the first and last hop.
+    ds_endpoints = pd.Series(dtype=float)
     for hop in [route[0], route[-1]]:
         ds_endpoint = get_carbon_emission_rates(hop.iso, start, end, host_transfer_power_in_watts)
         ds_endpoints = ds_endpoints.add(ds_endpoint, fill_value=0)
-    return (ds_network.add(ds_endpoints, fill_value=0), ds_network, ds_endpoints)
+    return (ds_network.add(ds_endpoints, fill_value=0), ds_network, ds_endpoints, power_ratio_with_carbon_data)
 
 def dump_emission_rates(ds: pd.Series) -> dict:
     if not ds.empty:
@@ -282,7 +312,8 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
                         DEFAULT_STORAGE_POWER * DEFAULT_DC_PUE)
                     (transfer_carbon_emission_rates, \
                         transfer_network_carbon_emission_rates, \
-                        transfer_endpoint_carbon_emission_rates) = all_transfer_carbon_emission_rates
+                        transfer_endpoint_carbon_emission_rates,
+                        power_ratio_with_carbon_data) = all_transfer_carbon_emission_rates
 
                     if workload.use_new_optimization:
                         calculate_total_carbon_emissions = calculate_total_carbon_emissions_linear
@@ -315,6 +346,8 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
                     d_misc['route'] = [str(dev) for dev in route]
                     is_router = lambda d: d.device_type == NetworkDeviceType.ROUTER
                     d_misc['route.hop_count'] = sum(1 for dev in route if is_router(dev))
+                    if power_ratio_with_carbon_data:
+                        d_misc['transfer.network.power_ratio_with_carbon_data'] = power_ratio_with_carbon_data
                     d_misc['emission_rates']['compute'] = dump_emission_rates(compute_carbon_emission_rates)
                     d_misc['emission_rates']['transfer'] = dump_emission_rates(transfer_carbon_emission_rates)
                     d_misc['emission_rates']['transfer.network'] = dump_emission_rates(transfer_network_carbon_emission_rates)
