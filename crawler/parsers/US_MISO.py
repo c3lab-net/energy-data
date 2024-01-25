@@ -50,8 +50,8 @@ def data_processer(json_data, logger):
         try:
             k = mapping[fuel['CATEGORY']]
         except KeyError as e:
-            logger.warning("Key '{}' is missing from the MISO fuel mapping.".format(
-                fuel['CATEGORY']))
+            #logger.warning("Key '{}' is missing from the MISO fuel mapping.".format(
+            #    fuel['CATEGORY']))
             k = 'unknown'
         v = float(fuel['ACT'])
         production[k] = production.get(k, 0.0) + v
