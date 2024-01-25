@@ -305,10 +305,10 @@ class Rate(ValueWithUnit):
     def __init__(self, value=1., unit: RateUnit = RateUnit.bps):
         super().__init__(value, UnitPrefix(unit))
 
-    def bps(self):
+    def bps(self) -> float:
         return super().absolute_value()
 
-    def gbps(self):
+    def gbps(self) -> float:
         return super().giga_value()
 
     def __mul__(self, other):

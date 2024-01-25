@@ -15,15 +15,15 @@ import numpy as np
 import pandas as pd
 from pandas.tseries.frequencies import to_offset
 from webargs.flaskparser import use_args
-from api.helpers.balancing_authority import get_cached_isos_from_gps, get_iso_from_gps
 
+from api.helpers.balancing_authority import get_cached_isos_from_gps, get_iso_from_gps
 from api.helpers.carbon_intensity import get_carbon_intensity_list, calculate_total_carbon_emissions_linear, calculate_total_carbon_emissions_naive
 from api.models.cloud_location import CloudLocationManager, CloudRegion, get_route_between_cloud_regions
 from api.models.common import CarbonDataSource, Coordinate, ISOName, get_iso_format_for_carbon_source, identify_iso_format
 from api.models.network_device import NetworkDevice, NetworkDeviceType, create_network_devices
 from api.models.optimization_engine import OptimizationEngine, OptimizationFactor
 from api.models.wan_bandwidth import load_wan_bandwidth_model
-from api.models.workload import DEFAULT_DC_PUE, DEFAULT_NETWORK_PUE, DEFAULT_NETWORK_REDUNDANCY, DEFAULT_STORAGE_POWER, CarbonAccountingMode, CloudLocation, InterRegionRouteSource, Workload
+from api.models.workload import DEFAULT_DC_PUE, DEFAULT_NETWORK_PUE, DEFAULT_NETWORK_REDUNDANCY, DEFAULT_STORAGE_POWER, CarbonAccountingMode, CloudLocation, InterRegionRouteSource, NetworkHopCarbonEstimationHeuristic, Workload
 from api.models.dataclass_extensions import *
 from api.util import Rate, RateUnit, Size, SizeUnit, round_down, round_up, log_runtime
 
@@ -37,9 +37,6 @@ g_optimizer = OptimizationEngine([t[0] for t in OPTIMIZATION_FACTORS_AND_WEIGHTS
                                  [t[1] for t in OPTIMIZATION_FACTORS_AND_WEIGHTS])
 g_wan_bandwidth = load_wan_bandwidth_model()
 
-
-class NoCarbonException(ValueError):
-    pass
 
 def get_candidate_regions(candidate_providers: list[str], candidate_locations: list[CloudLocation],
                           original_location: str) \
@@ -160,7 +157,12 @@ def get_preloaded_carbon_data(iso: str, start: datetime, end: datetime) -> pd.Se
     if key in carbon_data_store:
         return carbon_data_store[key]
     else:
-        raise NoCarbonException(f'No carbon data found for iso {iso} in time range ({start}, {end})')
+        raise ValueError(f'No carbon data found for iso {iso} in time range ({start}, {end})')
+
+def has_carbon_data(iso: str, start: datetime, end: datetime) -> bool:
+    global carbon_data_store
+    key = (iso, start, end)
+    return key in carbon_data_store
 
 def get_transfer_rate(route: list[NetworkDevice], start: datetime, end: datetime, max_delay: timedelta) -> Rate:
     # TODO: update this to consider route
@@ -215,55 +217,138 @@ def get_carbon_emission_rates(iso: ISOName, start: datetime, end: datetime, powe
     carbon_intensity = get_preloaded_carbon_data(iso, start, end)
     return calculate_carbon_emission_rates(carbon_intensity, power_in_watts)
 
+def get_network_carbon_emission_rates_with_estimation(route: list[NetworkDevice],
+                                                      start: datetime, end: datetime,
+                                                      transfer_rate: Rate,
+                                                      estimation_heuristic: NetworkHopCarbonEstimationHeuristic,
+                                                      carbon_estimation_route_average_ratio_threshold: float,
+                                                      carbon_estimation_distance_km_threshold: float) -> \
+                                                        tuple[pd.Series, float]:
+    """Calcualte total network carbon emission rates, including estimated carbon cost for hops without carbon data.
+
+        Returns:
+            ds_network: carbon emission rates for the entire network
+            power_ratio_with_carbon_data: ratio of network power with carbon data to total network power
+    """
+    def _get_nearst_neighbor_index_with_carbon_data(route: list[NetworkDevice],
+                                                    target_index: int,
+                                                    no_carbon_isos: set[ISOName],
+                                                    distance_km_threshold: float) -> int:
+        """Find the nearest neighbor with carbon data, within a distance threshold."""
+        def _hop_distance_km(i, j) -> float:
+            distance_i = route[i].distance_from_route_start_km
+            distance_j = route[j].distance_from_route_start_km
+            return abs(distance_i - distance_j)
+
+        candidate_index_left = next((i for i in range(target_index - 1, -1, -1) \
+                                      if route[i].iso not in no_carbon_isos), None)
+        candidate_index_right = next((i for i in range(target_index + 1, len(route)) \
+                                       if route[i].iso not in no_carbon_isos), None)
+        candidate_indices = filter(lambda i: i is not None, [candidate_index_left, candidate_index_right])
+        return next((t[0] for t in sorted([(i, _hop_distance_km(target_index, i)) for i in candidate_indices],
+                                          key=lambda t: t[1]) if t[1] <= distance_km_threshold), -1)
+
+    def _get_per_hop_power_in_watts(hop: NetworkDevice) -> float:
+        return hop.get_energy_intensity_w_per_gbps() * transfer_rate.gbps() * \
+            DEFAULT_NETWORK_PUE * DEFAULT_NETWORK_REDUNDANCY
+
+    # Keep track of ISOs without carbon data, in case we need to estimate for these hops later.
+    no_carbon_isos: set[ISOName] = set()
+
+    # Group devices by their ISO to minimize timeseries operations.
+    total_network_power_per_iso: dict[ISOName, float] = defaultdict(float)
+    for hop in route:
+        iso = hop.iso
+        per_hop_power_in_watts = _get_per_hop_power_in_watts(hop)
+        total_network_power_per_iso[iso] += per_hop_power_in_watts
+        # Keep track of ISOs without carbon data, in case we need to estimate for these hops later.
+        if not has_carbon_data(iso, start, end):
+            no_carbon_isos.add(iso)
+
+    # Sum up carbon time series for all hops with carbon data.
+    ds_network = pd.Series(dtype=float)
+    for iso, network_power_per_iso in total_network_power_per_iso.items():
+        if iso in no_carbon_isos:
+            continue
+        ds_hop = get_carbon_emission_rates(iso, start, end, network_power_per_iso)
+        ds_network = ds_network.add(ds_hop, fill_value=0)
+
+    # All hops have carbon data, no need to estimate.
+    if len(no_carbon_isos) == 0:
+        return ds_network, 1.
+
+    # Estimate carbon emission rate for hops without carbon data.
+    sum_network_power_without_carbon_data = sum(total_network_power_per_iso[iso] for iso in no_carbon_isos)
+    total_network_power = sum(total_network_power_per_iso.values())
+    power_ratio_with_carbon_data = 1 - sum_network_power_without_carbon_data / total_network_power
+
+    error_message = f'Carbon data is only available for {power_ratio_with_carbon_data * 100:.2f}% ' \
+                    f'of total network power.\n' \
+                    f'ISOs with missing carbon data ({len(no_carbon_isos)}): {", ".join(no_carbon_isos)}.\n'
+
+    match estimation_heuristic:
+        case NetworkHopCarbonEstimationHeuristic.RouteAverage:
+            # If carbon data is not available for a small portion of the hops (in total power), we'll use re-scale
+            #   carbon emission rate based on this ratio of power with carbon data and total power.
+            if power_ratio_with_carbon_data > carbon_estimation_route_average_ratio_threshold:
+                ds_network /= power_ratio_with_carbon_data
+            else:
+                raise ValueError(error_message + \
+                    f'Only {(power_ratio_with_carbon_data * 100):.2f}% of the network power has carbon data, '
+                    f'but we need at least {(carbon_estimation_route_average_ratio_threshold * 100):.2f}%. ')
+        case NetworkHopCarbonEstimationHeuristic.NearestNeighbor:
+            # Use the nearest neighbor with carbon data to estimate carbon emission rate.
+                # For re-mapping ISOs to nearest neighbors, if it doesn't have carbon data.
+            total_network_power_per_remapped_iso: dict[ISOName, float] = defaultdict(float)
+            remap_failed_hop_count = 0
+            for i in range(len(route)):
+                if route[i].iso not in no_carbon_isos:
+                    continue
+                nearest_neighbor_index = _get_nearst_neighbor_index_with_carbon_data(
+                    route, i, no_carbon_isos, carbon_estimation_distance_km_threshold)
+                if nearest_neighbor_index >= 0:
+                    remapped_iso = route[nearest_neighbor_index].iso
+                    total_network_power_per_remapped_iso[remapped_iso] += _get_per_hop_power_in_watts(route[i])
+                else:
+                    remap_failed_hop_count += 1
+            if remap_failed_hop_count > 0:
+                raise ValueError(error_message + \
+                                 f'No nearest neighbor with carbon data found for {remap_failed_hop_count} hops '
+                                 f'(distance threshold: {carbon_estimation_distance_km_threshold}).')
+            for iso, network_power_per_iso in total_network_power_per_remapped_iso.items():
+                ds_hop = get_carbon_emission_rates(iso, start, end, network_power_per_iso)
+                ds_network = ds_network.add(ds_hop, fill_value=0)
+        case NetworkHopCarbonEstimationHeuristic.WorldAverage:
+            raise NotImplementedError('WorldAverage not implemented yet')
+        case NetworkHopCarbonEstimationHeuristic.NoEstimation:
+            raise ValueError(error_message + f'No estimation is specified.')
+        case _:
+            raise NotImplementedError('Unknown NetworkHopCarbonEstimationHeuristic')
+    return ds_network, power_ratio_with_carbon_data
+
 def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: datetime, end: datetime,
-                                       transfer_rate: Rate, host_transfer_power_in_watts: float) -> \
+                                       transfer_rate: Rate, host_transfer_power_in_watts: float,
+                                       estimation_heuristic: NetworkHopCarbonEstimationHeuristic,
+                                       carbon_estimation_route_average_ratio_threshold: float,
+                                       carbon_estimation_distance_km_threshold: float) -> \
                                         tuple[pd.Series,pd.Series,pd.Series, float]:
     if len(route) == 0: # Same region, no transfer needed.
         return [pd.Series(dtype=float),pd.Series(dtype=float),pd.Series(dtype=float), None]
 
     # Transfer power includes both end hosts and network devices
 
-    # Part 1: Network power consumption from all devices
-    ds_network = pd.Series(dtype=float)
-
-    # Group devices by their ISO to minimize timeseries operations.
-    total_network_power_per_iso = defaultdict(float)
-    for hop in route:
-        per_hop_power_in_watts = hop.get_energy_intensity_w_per_gbps() * transfer_rate.gbps() * \
-            DEFAULT_NETWORK_PUE * DEFAULT_NETWORK_REDUNDANCY
-        # Too many hops counting all network devices, so summarize by ISO first and then request timeseries.
-        total_network_power_per_iso[hop.iso] += per_hop_power_in_watts
-
-    # If carbon data is not available for a small portion of the hops (in total power), we'll use re-scale
-    #   carbon emission rate based on this ratio of power with carbon data and total power.
-    sum_network_power_without_carbon_data = 0.
-    no_carbon_isos: list[str] = []
-    for iso, network_power_per_iso in total_network_power_per_iso.items():
-        try:
-            ds_hop = get_carbon_emission_rates(iso, start, end, network_power_per_iso)
-            ds_network = ds_network.add(ds_hop, fill_value=0)
-        except NoCarbonException:
-            sum_network_power_without_carbon_data += network_power_per_iso
-            no_carbon_isos.append(iso)
-
-    # Requires a minimum ratio of carbon data availability to avoid over-estimation.
-    AVAILABLE_RATIO_THRESHOLD = 0.66
-    total_network_power = sum(total_network_power_per_iso.values())
-    power_ratio_with_carbon_data = 1 - sum_network_power_without_carbon_data / total_network_power
-    if power_ratio_with_carbon_data > AVAILABLE_RATIO_THRESHOLD:
-        current_app.logger.warning(f'Carbon data is only available for {sum_network_power_without_carbon_data} W '
-                                   f'out of {total_network_power} W network power')
-        ds_network /= power_ratio_with_carbon_data
-    else:
-        raise ValueError(
-            f'Carbon data is only available for {power_ratio_with_carbon_data} of the network power '
-            f'(need at least {AVAILABLE_RATIO_THRESHOLD}). ISOs with missing carbon data: {no_carbon_isos}')
-
-    # Part 2: End host power consumption, at the locations of the first and last hop.
+    # Part 1: End host power consumption, at the locations of the first and last hop.
     ds_endpoints = pd.Series(dtype=float)
     for hop in [route[0], route[-1]]:
         ds_endpoint = get_carbon_emission_rates(hop.iso, start, end, host_transfer_power_in_watts)
         ds_endpoints = ds_endpoints.add(ds_endpoint, fill_value=0)
+
+    # Part 2: Network power consumption from all devices along the route.
+    ds_network, power_ratio_with_carbon_data = \
+        get_network_carbon_emission_rates_with_estimation(route, start, end, transfer_rate, estimation_heuristic,
+                                                          carbon_estimation_route_average_ratio_threshold,
+                                                          carbon_estimation_distance_km_threshold)
+
     return (ds_network.add(ds_endpoints, fill_value=0), ds_network, ds_endpoints, power_ratio_with_carbon_data)
 
 def dump_emission_rates(ds: pd.Series) -> dict:
@@ -309,7 +394,10 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
                     all_transfer_carbon_emission_rates = get_transfer_carbon_emission_rates(
                         route, start, end,
                         transfer_rate,
-                        DEFAULT_STORAGE_POWER * DEFAULT_DC_PUE)
+                        DEFAULT_STORAGE_POWER * DEFAULT_DC_PUE,
+                        workload.network_hop_carbon_estimation_heuristic,
+                        workload.network_hop_carbon_estimation_route_average_ratio_threshold,
+                        workload.network_hop_carbon_estimation_distance_km_threshold)
                     (transfer_carbon_emission_rates, \
                         transfer_network_carbon_emission_rates, \
                         transfer_endpoint_carbon_emission_rates,

@@ -27,6 +27,13 @@ class CarbonAccountingMode(str, Enum):
     ComputeAndNetwork = "compute-and-network"
 
 
+class NetworkHopCarbonEstimationHeuristic(str, Enum):
+    NoEstimation = "no-estimation"
+    RouteAverage = "route-average"
+    NearestNeighbor = "nearest-neighbor"
+    WorldAverage = "world-average"
+
+
 @dataclass
 class WorkloadSchedule:
     type: ScheduleType = field_enum(ScheduleType)
@@ -151,6 +158,10 @@ class Workload:
     carbon_accounting_mode: CarbonAccountingMode = field_enum(CarbonAccountingMode, CarbonAccountingMode.ComputeOnly)
     inter_region_route_source: InterRegionRouteSource = field_enum(InterRegionRouteSource,
                                                                    InterRegionRouteSource.ITDK)
+    network_hop_carbon_estimation_heuristic: NetworkHopCarbonEstimationHeuristic = \
+        field_enum(NetworkHopCarbonEstimationHeuristic, NetworkHopCarbonEstimationHeuristic.NoEstimation)
+    network_hop_carbon_estimation_route_average_ratio_threshold: float = field(default=0.66)
+    network_hop_carbon_estimation_distance_km_threshold: float = field(default=200)
 
     @validates_schema
     def validate_schema(self, data, **kwargs):
