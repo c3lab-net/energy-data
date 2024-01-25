@@ -240,6 +240,8 @@ def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: dateti
     return (ds_network.add(ds_endpoints, fill_value=0), ds_network, ds_endpoints)
 
 def dump_emission_rates(ds: pd.Series) -> dict:
+    assert ds[-1] == 0., 'Last value of emission rates should be dummy zero'
+    ds = ds[:-1]
     return json.loads(ds.to_json(orient='index', date_format='iso'))
 
 def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[dict[OptimizationFactor, float], dict[str, Any]]:
