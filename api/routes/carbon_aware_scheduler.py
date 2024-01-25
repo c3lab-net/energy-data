@@ -480,19 +480,20 @@ class CarbonAwareScheduler(Resource):
 
         current_app.logger.info(f'Comparing {len(d_region_scores)} regions ...')
         optimal_regions, d_weighted_scores = g_optimizer.compare_candidates(d_region_scores, True)
-        if not optimal_regions:
-            return orig_request | {
-                'error': 'No viable candidate',
-                'isos': d_region_isos,
-                'details': d_region_warnings
-            }, 400
-
-        return orig_request | {
+        response = orig_request | {
             'original-region': str(args.original_location),
-            'optimal-regions': optimal_regions,
             'isos': d_region_isos,
-            'weighted-scores': d_weighted_scores,
-            'raw-scores': d_region_scores,
             'warnings': d_region_warnings,
             'details': d_misc_details,
         }
+
+        if not optimal_regions:
+            return response | {
+                'error': 'No viable candidate',
+            }, 400
+        else:
+            return response | {
+                'optimal-regions': optimal_regions,
+                'weighted-scores': d_weighted_scores,
+                'raw-scores': d_region_scores,
+            }
