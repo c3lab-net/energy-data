@@ -25,7 +25,7 @@ from api.models.optimization_engine import OptimizationEngine, OptimizationFacto
 from api.models.wan_bandwidth import load_wan_bandwidth_model
 from api.models.workload import DEFAULT_DC_PUE, DEFAULT_NETWORK_PUE, DEFAULT_NETWORK_REDUNDANCY, DEFAULT_STORAGE_POWER, CarbonAccountingMode, CloudLocation, InterRegionRouteSource, Workload
 from api.models.dataclass_extensions import *
-from api.util import Rate, RateUnit, Size, SizeUnit, round_up, log_runtime
+from api.util import Rate, RateUnit, Size, SizeUnit, round_down, round_up, log_runtime
 
 g_cloud_manager = CloudLocationManager()
 OPTIMIZATION_FACTORS_AND_WEIGHTS = [
@@ -180,10 +180,14 @@ def convert_carbon_intensity_to_pd_series(iso: ISOName, l_carbon_intensity: list
     df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
     df.set_index('timestamp', inplace=True)
     df.sort_index(inplace=True)
+    ds = df['carbon_intensity']
 
     # Only consider hourly data, using average carbon intensity.
-    df = df.resample('H').mean()
-    ds = df['carbon_intensity']
+    granularity = timedelta(hours=1)
+    ds = ds.resample(granularity).mean()
+    ds.ffill(inplace=True)
+    # Avoid returning more data than requested
+    ds = ds.loc[round_down(start, granularity):round_up(end, granularity)]
 
     # Insert end-of-time index with zero value to avoid out-of-bound read corner case handling
     if len(ds.index) < 2:
@@ -192,7 +196,6 @@ def convert_carbon_intensity_to_pd_series(iso: ISOName, l_carbon_intensity: list
         ds_freq = to_offset(np.diff(ds.index).min())
         # pd.infer_freq() only works with perfectly regular frequency
         # ds_freq = to_offset(pd.infer_freq(ds.index))
-    ds.ffill(inplace=True)
     end_time_of_series = ds.index.max() + ds_freq
     ds[end_time_of_series.to_pydatetime()] = 0.
 
@@ -237,6 +240,8 @@ def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: dateti
     return (ds_network.add(ds_endpoints, fill_value=0), ds_network, ds_endpoints)
 
 def dump_emission_rates(ds: pd.Series) -> dict:
+    assert ds[-1] == 0., 'Last value of emission rates should be dummy zero'
+    ds = ds[:-1]
     return json.loads(ds.to_json(orient='index', date_format='iso'))
 
 def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[dict[OptimizationFactor, float], dict[str, Any]]:
