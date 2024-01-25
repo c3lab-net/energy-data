@@ -217,6 +217,11 @@ def get_carbon_emission_rates(iso: ISOName, start: datetime, end: datetime, powe
     carbon_intensity = get_preloaded_carbon_data(iso, start, end)
     return calculate_carbon_emission_rates(carbon_intensity, power_in_watts)
 
+def get_constant_carbon_emission_rates(carbon_intensity_value: float, reference: pd.Series,
+                                       power_in_watts: float) -> pd.Series:
+    carbon_intensity = pd.Series(carbon_intensity_value, index=reference.index)
+    return calculate_carbon_emission_rates(carbon_intensity, power_in_watts)
+
 def get_network_carbon_emission_rates_with_estimation(route: list[NetworkDevice],
                                                       start: datetime, end: datetime,
                                                       transfer_rate: Rate,
@@ -319,7 +324,11 @@ def get_network_carbon_emission_rates_with_estimation(route: list[NetworkDevice]
                 ds_hop = get_carbon_emission_rates(iso, start, end, network_power_per_iso)
                 ds_network = ds_network.add(ds_hop, fill_value=0)
         case NetworkHopCarbonEstimationHeuristic.WorldAverage:
-            raise NotImplementedError('WorldAverage not implemented yet')
+            # Source: https://www.iea.org/reports/global-energy-co2-status-report-2019/emissions
+            WORLD_AVERAGE_CARBON_INTENSITY = 475.0 # gCO2/kWh
+            ds_estimate = get_constant_carbon_emission_rates(WORLD_AVERAGE_CARBON_INTENSITY, ds_network,
+                                                             sum_network_power_without_carbon_data)
+            ds_network = ds_network.add(ds_estimate, fill_value=0)
         case NetworkHopCarbonEstimationHeuristic.NoEstimation:
             raise ValueError(error_message + f'No estimation is specified.')
         case _:
