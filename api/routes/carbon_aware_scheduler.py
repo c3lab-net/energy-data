@@ -126,10 +126,7 @@ def preload_carbon_data(workload: Workload,
         l_carbon_intensity = get_carbon_intensity_list(iso, start, end + max_delay,
                                                         carbon_data_source, use_prediction,
                                                         desired_renewable_ratio)
-        assert len(l_carbon_intensity) > 0 and \
-            min([d['timestamp'] for d in l_carbon_intensity]) <= start and \
-            max([d['timestamp'] for d in l_carbon_intensity]) >= end + max_delay, \
-                f'Not enough carbon data for {iso} to cover time range [{start}, {end}]'
+        assert len(l_carbon_intensity) > 0, f'No carbon data for {iso} in time range [{start}, {end}]'
         carbon_data_store[(iso, start, end)] = \
             convert_carbon_intensity_to_pd_series(iso, l_carbon_intensity, start, end + max_delay)
     return carbon_data_store
@@ -184,10 +181,13 @@ def convert_carbon_intensity_to_pd_series(iso: ISOName, l_carbon_intensity: list
 
     # Only consider hourly data, using average carbon intensity.
     granularity = timedelta(hours=1)
-    ds = ds.resample(granularity).mean()
-    ds.ffill(inplace=True)
-    # Avoid returning more data than requested
+    # Remove data outside of the time range, to avoid returning more data than requested
     ds = ds.loc[round_down(start, granularity):round_up(end, granularity)]
+    # Resample to hourly granularity
+    ds = ds.resample(granularity).mean()
+
+    assert ds.index.min() <= start and end <= ds.index.max(), \
+        f'Carbon data not available for iso {iso} for the entire time range [{start}, {end}]'
 
     # Insert end-of-time index with zero value to avoid out-of-bound read corner case handling
     if len(ds.index) < 2:
@@ -198,9 +198,6 @@ def convert_carbon_intensity_to_pd_series(iso: ISOName, l_carbon_intensity: list
         # ds_freq = to_offset(pd.infer_freq(ds.index))
     end_time_of_series = ds.index.max() + ds_freq
     ds[end_time_of_series.to_pydatetime()] = 0.
-
-    assert ds.index.min() <= start and end <= ds.index.max(), \
-        f'Carbon data not available for iso {iso} for the entire time range [{start}, {end}]'
 
     return ds
 
