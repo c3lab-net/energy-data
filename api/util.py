@@ -11,6 +11,7 @@ from time import sleep, time
 import yaml
 import traceback
 import psycopg2
+from psycopg2.extras import execute_values
 import dataclasses
 from flask import current_app
 from json import JSONEncoder
@@ -20,6 +21,10 @@ from werkzeug.exceptions import HTTPException
 
 simple_cache = Cache(config={
     'CACHE_TYPE': 'SimpleCache'
+})
+
+iso_cache = Cache(config={
+    'CACHE_TYPE': 'SimpleCache',
 })
 
 carbon_data_cache = Cache(config={
@@ -106,6 +111,20 @@ def psql_execute_list(cursor: psycopg2.extensions.cursor, query: str,
         result = cursor.fetchall()
     except psycopg2.Error as e:
         current_app.logger.error(f'psql_execute_scalar("{query}", {args}): {e}')
+        current_app.logger.error(traceback.format_exc())
+        raise PSqlExecuteException("Failed to execute SQL query.")
+    return result
+
+def psql_execute_values(cursor: psycopg2.extensions.cursor, query: str,
+                      args: Union[Sequence[Any], dict[str, str]] = None,
+                      page_size=1000) -> list[tuple]:
+    """Execute the psql query using execute_values and return all rows as a list of tuples."""
+    try:
+        execute_values(cursor, query, args, page_size=page_size)
+        current_app.logger.debug(f'psql_execute_values("{query}", {args}): {cursor.query}')
+        result = cursor.fetchall()
+    except psycopg2.Error as e:
+        current_app.logger.error(f'psql_execute_values("{query}", {args}): {e}')
         current_app.logger.error(traceback.format_exc())
         raise PSqlExecuteException("Failed to execute SQL query.")
     return result

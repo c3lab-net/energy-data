@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from pandas.tseries.frequencies import to_offset
 from webargs.flaskparser import use_args
-from api.helpers.balancing_authority import get_iso_from_gps
+from api.helpers.balancing_authority import get_cached_isos_from_gps, get_iso_from_gps
 
 from api.helpers.carbon_intensity import get_carbon_intensity_list, calculate_total_carbon_emissions_linear, calculate_total_carbon_emissions_naive
 from api.models.cloud_location import CloudLocationManager, CloudRegion, get_route_between_cloud_regions
@@ -66,21 +66,43 @@ def get_candidate_regions(candidate_providers: list[str], candidate_locations: l
     except Exception as ex:
         raise ValueError(f'Failed to get candidate regions: {ex}') from ex
 
-def init_lookup_iso(_carbon_data_source: CarbonDataSource):
-    global carbon_data_source
-    carbon_data_source = _carbon_data_source
-
-def task_lookup_iso(region: CloudRegion|NetworkDevice) -> tuple:
-    global carbon_data_source
+@log_runtime
+def lookup_all_isos(regions: list[CloudRegion|NetworkDevice],
+                    carbon_data_source: CarbonDataSource) -> list[tuple]:
     iso_format = get_iso_format_for_carbon_source(carbon_data_source)
-    if region.iso and iso_format == identify_iso_format(region.iso):
-        return str(region), region.iso, region.gps, None, None
-    try:
-        (latitude, longitude) = region.gps
-        iso = get_iso_from_gps(latitude, longitude, iso_format)
-        return str(region), iso, region.gps, None, None
-    except Exception as ex:
-        return str(region), None, region.gps, str(ex), traceback.format_exc()
+    coordinates_to_indices: dict[Coordinate, list[int]] = defaultdict(list)
+    for i in range(len(regions)):
+        region = regions[i]
+        # Re-query if ISO format is different.
+        if region.iso and iso_format != identify_iso_format(region.iso):
+            region.iso = None
+        if not region.iso:
+            coordinates_to_indices[region.gps].append(i)
+
+    # Query for cached ISOs first
+    coordinates = list(coordinates_to_indices.keys())
+    cached_isos = get_cached_isos_from_gps(coordinates, carbon_data_source)
+    for coordinate, cached_iso in zip(coordinates, cached_isos):
+        if not cached_iso:
+            continue
+        for i in coordinates_to_indices[coordinate]:
+            regions[i].iso = cached_iso
+    cached_region_count = len([region for region in regions if region.iso])
+    current_app.logger.info(f'ISO cached/total: {cached_region_count}/{len(regions)}')
+
+    # Fill in the rest with new queries
+    results = []
+    for region in regions:
+        if region.iso:
+            results.append((str(region), region.iso, region.gps, None, None))
+        else:
+            try:
+                (latitude, longitude) = region.gps
+                iso = get_iso_from_gps(latitude, longitude, iso_format)
+                results.append((str(region), iso, region.gps, None, None))
+            except Exception as ex:
+                results.append((str(region), None, region.gps, str(ex), traceback.format_exc()))
+    return results
 
 def init_preload_carbon_data(_workload: Workload,
                                     _carbon_data_source: CarbonDataSource,
@@ -392,13 +414,7 @@ class CarbonAwareScheduler(Resource):
         current_app.logger.info(f'Looking up ISO for {len(candidate_regions)} regions and '
                                 f'{len(transfer_hops)} unique transit hops ...')
         all_regions = candidate_regions + transfer_hops
-        @log_runtime
-        def _lookup_all_isos(all_regions):
-            with Pool(1 if __debug__ else 4,
-                    initializer=init_lookup_iso,
-                    initargs=(args.carbon_data_source,)) as pool:
-                return pool.map(task_lookup_iso, all_regions)
-        result_iso = _lookup_all_isos(all_regions)
+        result_iso = lookup_all_isos(all_regions, args.carbon_data_source)
         for i in range(len(all_regions)):
             (region_name, iso, gps, ex, stack_trace) = result_iso[i]
             if iso:
