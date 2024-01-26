@@ -150,6 +150,8 @@ class Workload:
     desired_renewable_ratio: Optional[float] = \
         optional_field_with_validation(lambda ratio: 0. <= ratio <= 1.)
     optimize_carbon: bool = field(default=True)
+    # Whether to only include emap ISOs with full range carbon data.
+    only_emap_full_range_isos: bool = field(default=False)
 
     watts_per_core: float = field(default=DEFAULT_CPU_POWER_PER_CORE)
     core_count: float = field(default=1.)

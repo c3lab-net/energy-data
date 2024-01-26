@@ -5,6 +5,8 @@ import json
 from math import ceil
 import math
 from multiprocessing import Pool
+import os
+from pathlib import Path
 import traceback
 from typing import Any
 
@@ -19,13 +21,13 @@ from webargs.flaskparser import use_args
 from api.helpers.balancing_authority import get_cached_isos_from_gps, get_iso_from_gps
 from api.helpers.carbon_intensity import get_carbon_intensity_list, calculate_total_carbon_emissions_linear, calculate_total_carbon_emissions_naive
 from api.models.cloud_location import CloudLocationManager, CloudRegion, get_route_between_cloud_regions
-from api.models.common import CarbonDataSource, Coordinate, ISOName, get_iso_format_for_carbon_source, identify_iso_format
+from api.models.common import CarbonDataSource, Coordinate, ISOName, IsoFormat, get_iso_format_for_carbon_source, identify_iso_format
 from api.models.network_device import NetworkDevice, NetworkDeviceType, create_network_devices
 from api.models.optimization_engine import OptimizationEngine, OptimizationFactor
 from api.models.wan_bandwidth import load_wan_bandwidth_model
 from api.models.workload import DEFAULT_DC_PUE, DEFAULT_NETWORK_PUE, DEFAULT_NETWORK_REDUNDANCY, DEFAULT_STORAGE_POWER, CarbonAccountingMode, CloudLocation, InterRegionRouteSource, NetworkHopCarbonEstimationHeuristic, Workload
 from api.models.dataclass_extensions import *
-from api.util import Rate, RateUnit, Size, SizeUnit, round_down, round_up, log_runtime
+from api.util import Rate, RateUnit, Size, SizeUnit, load_yaml_data, round_down, round_up, log_runtime
 
 g_cloud_manager = CloudLocationManager()
 OPTIMIZATION_FACTORS_AND_WEIGHTS = [
@@ -114,6 +116,19 @@ def init_preload_carbon_data(_workload: Workload,
     use_prediction = _use_prediction
     desired_renewable_ratio = _desired_renewable_ratio
 
+def get_emap_full_range_carbon_isos(config_path: os.path) -> list[str]:
+    """Load the list of emap ISOs with full yearly coverage."""
+    # Load ISO-to-WattTime-BA mapping from yaml config
+    yaml_data = load_yaml_data(config_path)
+    carbon_intensity_map_name = 'emap_full_range_carbon_isos'
+    assert yaml_data is not None and carbon_intensity_map_name in yaml_data, \
+        f'Failed to load {carbon_intensity_map_name} from config.'
+    isos = yaml_data[carbon_intensity_map_name]
+    return [f'{IsoFormat.EMap}:{iso}' for iso in isos]
+
+EMAP_FULL_RANGE_CARBON_ISOS = get_emap_full_range_carbon_isos(
+    os.path.join(Path(__file__).parent.absolute(), 'emap_full_range_carbon_isos.yaml'))
+
 def preload_carbon_data(workload: Workload,
                         iso: str,
                         carbon_data_source: CarbonDataSource,
@@ -123,9 +138,13 @@ def preload_carbon_data(workload: Workload,
     running_intervals = workload.get_running_intervals_in_24h()
     for (start, end) in running_intervals:
         max_delay = workload.schedule.max_delay
-        l_carbon_intensity = get_carbon_intensity_list(iso, start, end + max_delay,
-                                                        carbon_data_source, use_prediction,
-                                                        desired_renewable_ratio)
+        # This is simulate missing data from network route.
+        if workload.only_emap_full_range_isos and iso not in EMAP_FULL_RANGE_CARBON_ISOS:
+            l_carbon_intensity = []
+        else:
+            l_carbon_intensity = get_carbon_intensity_list(iso, start, end + max_delay,
+                                                           carbon_data_source, use_prediction,
+                                                           desired_renewable_ratio)
         assert len(l_carbon_intensity) > 0, f'No carbon data for {iso} in time range [{start}, {end}]'
         carbon_data_store[(iso, start, end)] = \
             convert_carbon_intensity_to_pd_series(iso, l_carbon_intensity, start, end + max_delay)
