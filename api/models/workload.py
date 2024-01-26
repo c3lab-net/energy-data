@@ -162,6 +162,8 @@ class Workload:
                                                                    InterRegionRouteSource.ITDK)
     network_hop_carbon_estimation_heuristic: NetworkHopCarbonEstimationHeuristic = \
         field_enum(NetworkHopCarbonEstimationHeuristic, NetworkHopCarbonEstimationHeuristic.NoEstimation)
+    # The minimum ratio of known carbon power to total power for a route to be considered for carbon estimation.
+    network_hop_carbon_estimation_minimum_known_carbon_power_ratio: float = field(default=0.5)
     network_hop_carbon_estimation_route_average_ratio_threshold: float = field(default=0.66)
     network_hop_carbon_estimation_distance_km_threshold: float = field(default=200)
 

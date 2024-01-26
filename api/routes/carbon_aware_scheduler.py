@@ -249,6 +249,7 @@ def get_network_carbon_emission_rates_with_estimation(route: list[NetworkDevice]
                                                       start: datetime, end: datetime,
                                                       transfer_rate: Rate,
                                                       estimation_heuristic: NetworkHopCarbonEstimationHeuristic,
+                                                      carbon_estimation_minimum_known_carbon_power_ratio: float,
                                                       carbon_estimation_route_average_ratio_threshold: float,
                                                       carbon_estimation_distance_km_threshold: float,
                                                       only_emap_full_range_isos) -> \
@@ -315,6 +316,10 @@ def get_network_carbon_emission_rates_with_estimation(route: list[NetworkDevice]
                     f'of total network power.\n' \
                     f'ISOs with missing carbon data ({len(no_carbon_isos)}): {", ".join(no_carbon_isos)}.\n'
 
+    if power_ratio_with_carbon_data < carbon_estimation_minimum_known_carbon_power_ratio:
+        raise ValueError(error_message + 'Available known power ratio is below the threshold ' + \
+            f'({carbon_estimation_minimum_known_carbon_power_ratio * 100:.2f}%).')
+
     match estimation_heuristic:
         case NetworkHopCarbonEstimationHeuristic.RouteAverage:
             # If carbon data is not available for a small portion of the hops (in total power), we'll use re-scale
@@ -363,6 +368,7 @@ def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: dateti
                                        src_iso: ISOName, dst_iso: ISOName,
                                        transfer_rate: Rate, host_transfer_power_in_watts: float,
                                        estimation_heuristic: NetworkHopCarbonEstimationHeuristic,
+                                       carbon_estimation_minimum_known_carbon_power_ratio: float,
                                        carbon_estimation_route_average_ratio_threshold: float,
                                        carbon_estimation_distance_km_threshold: float,
                                        only_emap_full_range_isos: bool) -> \
@@ -381,6 +387,7 @@ def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: dateti
     # Part 2: Network power consumption from all devices along the route.
     ds_network, power_ratio_with_carbon_data = \
         get_network_carbon_emission_rates_with_estimation(route, start, end, transfer_rate, estimation_heuristic,
+                                                          carbon_estimation_minimum_known_carbon_power_ratio,
                                                           carbon_estimation_route_average_ratio_threshold,
                                                           carbon_estimation_distance_km_threshold,
                                                           only_emap_full_range_isos)
@@ -434,6 +441,7 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion,
                         transfer_rate,
                         DEFAULT_STORAGE_POWER * DEFAULT_DC_PUE,
                         workload.network_hop_carbon_estimation_heuristic,
+                        workload.network_hop_carbon_estimation_minimum_known_carbon_power_ratio,
                         workload.network_hop_carbon_estimation_route_average_ratio_threshold,
                         workload.network_hop_carbon_estimation_distance_km_threshold,
                         workload.only_emap_full_range_isos_for_network_hops)
