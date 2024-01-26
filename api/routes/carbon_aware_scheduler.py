@@ -138,13 +138,9 @@ def preload_carbon_data(workload: Workload,
     running_intervals = workload.get_running_intervals_in_24h()
     for (start, end) in running_intervals:
         max_delay = workload.schedule.max_delay
-        # This is simulate missing data from network route.
-        if workload.only_emap_full_range_isos and iso not in EMAP_FULL_RANGE_CARBON_ISOS:
-            l_carbon_intensity = []
-        else:
-            l_carbon_intensity = get_carbon_intensity_list(iso, start, end + max_delay,
-                                                           carbon_data_source, use_prediction,
-                                                           desired_renewable_ratio)
+        l_carbon_intensity = get_carbon_intensity_list(iso, start, end + max_delay,
+                                                       carbon_data_source, use_prediction,
+                                                       desired_renewable_ratio)
         assert len(l_carbon_intensity) > 0, f'No carbon data for {iso} in time range [{start}, {end}]'
         carbon_data_store[(iso, start, end)] = \
             convert_carbon_intensity_to_pd_series(iso, l_carbon_intensity, start, end + max_delay)
@@ -361,7 +357,8 @@ def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: dateti
                                        transfer_rate: Rate, host_transfer_power_in_watts: float,
                                        estimation_heuristic: NetworkHopCarbonEstimationHeuristic,
                                        carbon_estimation_route_average_ratio_threshold: float,
-                                       carbon_estimation_distance_km_threshold: float) -> \
+                                       carbon_estimation_distance_km_threshold: float,
+                                       only_emap_full_range_isos: bool) -> \
                                         tuple[pd.Series,pd.Series,pd.Series, float]:
     if len(route) == 0: # Same region, no transfer needed.
         return [pd.Series(dtype=float),pd.Series(dtype=float),pd.Series(dtype=float), None]
@@ -373,6 +370,14 @@ def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: dateti
     for endpoint_iso in [src_iso, dst_iso]:
         ds_endpoint = get_carbon_emission_rates(endpoint_iso, start, end, host_transfer_power_in_watts)
         ds_endpoints = ds_endpoints.add(ds_endpoint, fill_value=0)
+
+    # Simulate no carbon data for transfer hops
+    if only_emap_full_range_isos:
+        global carbon_data_store
+        # Delete carbon data from store if the ISO is not in the full range list
+        for t in list(carbon_data_store.keys()):
+            if t[0] not in EMAP_FULL_RANGE_CARBON_ISOS:
+                del carbon_data_store[t]
 
     # Part 2: Network power consumption from all devices along the route.
     ds_network, power_ratio_with_carbon_data = \
@@ -430,7 +435,8 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion,
                         DEFAULT_STORAGE_POWER * DEFAULT_DC_PUE,
                         workload.network_hop_carbon_estimation_heuristic,
                         workload.network_hop_carbon_estimation_route_average_ratio_threshold,
-                        workload.network_hop_carbon_estimation_distance_km_threshold)
+                        workload.network_hop_carbon_estimation_distance_km_threshold,
+                        workload.only_emap_full_range_isos_for_network_hops)
                     (transfer_carbon_emission_rates, \
                         transfer_network_carbon_emission_rates, \
                         transfer_endpoint_carbon_emission_rates,
