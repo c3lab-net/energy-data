@@ -375,7 +375,7 @@ def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: dateti
     # Part 1: End host power consumption, at the locations of the first and last hop.
     ds_endpoints = pd.Series(dtype=float)
     for endpoint_iso in [src_iso, dst_iso]:
-        ds_endpoint = get_carbon_emission_rates(endpoint_iso, start, end, host_transfer_power_in_watts)
+        ds_endpoint = get_carbon_emission_rates(endpoint_iso, start, end, host_transfer_power_in_watts, only_emap_full_range_isos)
         ds_endpoints = ds_endpoints.add(ds_endpoint, fill_value=0)
 
     # Part 2: Network power consumption from all devices along the route.
