@@ -143,13 +143,15 @@ def init_parallel_process_candidate(_workload: Workload,
                                     _carbon_data_source: CarbonDataSource,
                                     _use_prediction: bool,
                                     _carbon_data_store: dict,
-                                    _d_candidate_routes: dict[str, list[NetworkDevice]]):
-    global workload, carbon_data_source, use_prediction, carbon_data_store, d_candidate_routes
+                                    _d_candidate_routes: dict[str, list[NetworkDevice]],
+                                    _origin_iso: ISOName):
+    global workload, carbon_data_source, use_prediction, carbon_data_store, d_candidate_routes, origin_iso
     workload = _workload
     carbon_data_source = _carbon_data_source
     use_prediction = _use_prediction
     carbon_data_store = _carbon_data_store
     d_candidate_routes = _d_candidate_routes
+    origin_iso = _origin_iso
 
 def get_preloaded_carbon_data(iso: str, start: datetime, end: datetime) -> pd.Series:
     global carbon_data_store
@@ -336,6 +338,7 @@ def get_network_carbon_emission_rates_with_estimation(route: list[NetworkDevice]
     return ds_network, power_ratio_with_carbon_data
 
 def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: datetime, end: datetime,
+                                       src_iso: ISOName, dst_iso: ISOName,
                                        transfer_rate: Rate, host_transfer_power_in_watts: float,
                                        estimation_heuristic: NetworkHopCarbonEstimationHeuristic,
                                        carbon_estimation_route_average_ratio_threshold: float,
@@ -348,8 +351,8 @@ def get_transfer_carbon_emission_rates(route: list[NetworkDevice], start: dateti
 
     # Part 1: End host power consumption, at the locations of the first and last hop.
     ds_endpoints = pd.Series(dtype=float)
-    for hop in [route[0], route[-1]]:
-        ds_endpoint = get_carbon_emission_rates(hop.iso, start, end, host_transfer_power_in_watts)
+    for endpoint_iso in [src_iso, dst_iso]:
+        ds_endpoint = get_carbon_emission_rates(endpoint_iso, start, end, host_transfer_power_in_watts)
         ds_endpoints = ds_endpoints.add(ds_endpoint, fill_value=0)
 
     # Part 2: Network power consumption from all devices along the route.
@@ -367,7 +370,8 @@ def dump_emission_rates(ds: pd.Series) -> dict:
             ds = ds.iloc[:-1]
     return json.loads(ds.to_json(orient='index', date_format='iso'))
 
-def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[dict[OptimizationFactor, float], dict[str, Any]]:
+def calculate_workload_scores(workload: Workload, region: CloudRegion,
+                              origin_iso: ISOName) -> tuple[dict[OptimizationFactor, float], dict[str, Any]]:
     current_app.logger.debug('Calculating scores for region %s ...' % region)
 
     global d_candidate_routes
@@ -402,6 +406,7 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
                         region.iso, start, end, workload.get_power_in_watts() * DEFAULT_DC_PUE)
                     all_transfer_carbon_emission_rates = get_transfer_carbon_emission_rates(
                         route, start, end,
+                        origin_iso, region.iso,
                         transfer_rate,
                         DEFAULT_STORAGE_POWER * DEFAULT_DC_PUE,
                         workload.network_hop_carbon_estimation_heuristic,
@@ -471,11 +476,11 @@ def calculate_workload_scores(workload: Workload, region: CloudRegion) -> tuple[
     return d_scores, d_misc
 
 def task_process_candidate(region: CloudRegion) -> tuple:
-    global workload, carbon_data_source, use_prediction
+    global workload, carbon_data_source, use_prediction, origin_iso
     region_name = str(region)
     iso = region.iso
     try:
-        scores, d_misc = calculate_workload_scores(workload, region)
+        scores, d_misc = calculate_workload_scores(workload, region, origin_iso)
         return region_name, iso, scores, d_misc, None, None
     except Exception as ex:
         return region_name, iso, None, None, str(ex), traceback.format_exc()
@@ -589,7 +594,8 @@ class CarbonAwareScheduler(Resource):
         def _process_all_candidates(candidate_regions):
             with Pool(1 if __debug__ else 8,
                     initializer=init_parallel_process_candidate,
-                    initargs=(workload, args.carbon_data_source, args.use_prediction, carbon_data, d_candidate_routes)
+                    initargs=(workload, args.carbon_data_source, args.use_prediction, carbon_data, d_candidate_routes,
+                              d_region_isos[workload.original_location])
                     ) as pool:
                 return pool.map(task_process_candidate, candidate_regions)
         result = _process_all_candidates(candidate_regions)
