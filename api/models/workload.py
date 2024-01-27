@@ -161,11 +161,11 @@ class Workload:
     inter_region_route_source: InterRegionRouteSource = field_enum(InterRegionRouteSource,
                                                                    InterRegionRouteSource.ITDK)
     network_hop_carbon_estimation_heuristic: NetworkHopCarbonEstimationHeuristic = \
-        field_enum(NetworkHopCarbonEstimationHeuristic, NetworkHopCarbonEstimationHeuristic.NoEstimation)
+        field_enum(NetworkHopCarbonEstimationHeuristic, NetworkHopCarbonEstimationHeuristic.RouteAverage)
     # The minimum ratio of known carbon power to total power for a route to be considered for carbon estimation.
-    network_hop_carbon_estimation_minimum_known_carbon_power_ratio: float = field(default=0.5)
-    network_hop_carbon_estimation_route_average_ratio_threshold: float = field(default=0.66)
-    network_hop_carbon_estimation_distance_km_threshold: float = field(default=200)
+    network_hop_carbon_estimation_minimum_known_carbon_power_ratio: float = field(default=0.75)
+    network_hop_carbon_estimation_route_average_ratio_threshold: float = field(default=0.75)
+    network_hop_carbon_estimation_distance_km_threshold: float = field(default=50000)
 
     @validates_schema
     def validate_schema(self, data, **kwargs):

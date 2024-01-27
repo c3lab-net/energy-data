@@ -324,7 +324,7 @@ def get_network_carbon_emission_rates_with_estimation(route: list[NetworkDevice]
         case NetworkHopCarbonEstimationHeuristic.RouteAverage:
             # If carbon data is not available for a small portion of the hops (in total power), we'll use re-scale
             #   carbon emission rate based on this ratio of power with carbon data and total power.
-            if power_ratio_with_carbon_data > carbon_estimation_route_average_ratio_threshold:
+            if power_ratio_with_carbon_data >= carbon_estimation_route_average_ratio_threshold:
                 ds_network /= power_ratio_with_carbon_data
             else:
                 raise ValueError(error_message + \
