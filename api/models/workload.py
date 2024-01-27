@@ -27,6 +27,13 @@ class CarbonAccountingMode(str, Enum):
     ComputeAndNetwork = "compute-and-network"
 
 
+class NetworkHopCarbonEstimationHeuristic(str, Enum):
+    NoEstimation = "no-estimation"
+    RouteAverage = "route-average"
+    NearestNeighbor = "nearest-neighbor"
+    WorldAverage = "world-average"
+
+
 @dataclass
 class WorkloadSchedule:
     type: ScheduleType = field_enum(ScheduleType)
@@ -143,6 +150,8 @@ class Workload:
     desired_renewable_ratio: Optional[float] = \
         optional_field_with_validation(lambda ratio: 0. <= ratio <= 1.)
     optimize_carbon: bool = field(default=True)
+    # Whether to only include emap ISOs with full range carbon data for transfer carbon cost.
+    only_emap_full_range_isos_for_network_hops: bool = field(default=False)
 
     watts_per_core: float = field(default=DEFAULT_CPU_POWER_PER_CORE)
     core_count: float = field(default=1.)
@@ -151,6 +160,12 @@ class Workload:
     carbon_accounting_mode: CarbonAccountingMode = field_enum(CarbonAccountingMode, CarbonAccountingMode.ComputeOnly)
     inter_region_route_source: InterRegionRouteSource = field_enum(InterRegionRouteSource,
                                                                    InterRegionRouteSource.ITDK)
+    network_hop_carbon_estimation_heuristic: NetworkHopCarbonEstimationHeuristic = \
+        field_enum(NetworkHopCarbonEstimationHeuristic, NetworkHopCarbonEstimationHeuristic.RouteAverage)
+    # The minimum ratio of known carbon power to total power for a route to be considered for carbon estimation.
+    network_hop_carbon_estimation_minimum_known_carbon_power_ratio: float = field(default=0.75)
+    network_hop_carbon_estimation_route_average_ratio_threshold: float = field(default=0.75)
+    network_hop_carbon_estimation_distance_km_threshold: float = field(default=50000)
 
     @validates_schema
     def validate_schema(self, data, **kwargs):

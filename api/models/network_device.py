@@ -165,13 +165,17 @@ def create_network_devices(router_latlons: list[Coordinate], fiber_wkt_paths: st
         # If no fiber paths are provided, create a simple network with only routers and router-attached devices.
         if not fiber_wkt_paths or not fiber_types:
             network_devices = []
+            distance_from_route_start_km = 0.
+            last_coordinate = router_latlons[0]
             for gps in router_latlons:
                 # Already in (lat, lon) format
-                network_devices.append(NetworkDevice(NetworkDeviceType.ROUTER, gps, math.nan))
-                network_devices.append(NetworkDevice(NetworkDeviceType.WDM_SWITCH, gps, math.nan))
-                network_devices.append(NetworkDevice(NetworkDeviceType.WDM_SWITCH, gps, math.nan))
-                network_devices.append(NetworkDevice(NetworkDeviceType.TRANSPONDER, gps, math.nan))
-                network_devices.append(NetworkDevice(NetworkDeviceType.MUXPONDER, gps, math.nan))
+                distance_from_route_start_km += distance(last_coordinate, gps).km
+                last_coordinate = gps
+                network_devices.append(NetworkDevice(NetworkDeviceType.ROUTER, gps, distance_from_route_start_km))
+                network_devices.append(NetworkDevice(NetworkDeviceType.WDM_SWITCH, gps, distance_from_route_start_km))
+                network_devices.append(NetworkDevice(NetworkDeviceType.WDM_SWITCH, gps, distance_from_route_start_km))
+                network_devices.append(NetworkDevice(NetworkDeviceType.TRANSPONDER, gps, distance_from_route_start_km))
+                network_devices.append(NetworkDevice(NetworkDeviceType.MUXPONDER, gps, distance_from_route_start_km))
             return network_devices
 
         mls: MultiLineString = loads(fiber_wkt_paths)
